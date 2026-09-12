@@ -66,6 +66,83 @@ class ShapeValidationTests(unittest.TestCase):
             validate_edit_plan(plan, scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
         self.assertEqual(ctx.exception.code, "INVALID_EDIT_PLAN")
 
+    def test_base_revision_must_match_job_revision_when_supplied(self) -> None:
+        with self.assertRaises(EditPlanError) as ctx:
+            validate_edit_plan(
+                _plan(base_revision=7),
+                scope="selection",
+                selection_ids=["title-01"],
+                current_ids=_CURRENT_IDS,
+                expected_base_revision=8,
+            )
+        self.assertEqual(ctx.exception.code, "INVALID_EDIT_PLAN")
+        self.assertEqual(ctx.exception.details["plan_base_revision"], 7)
+        self.assertEqual(ctx.exception.details["expected_base_revision"], 8)
+
+    def test_bool_is_not_accepted_as_base_revision(self) -> None:
+        with self.assertRaises(EditPlanError):
+            validate_edit_plan(_plan(base_revision=True), scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
+    def test_summary_must_be_string_when_present(self) -> None:
+        with self.assertRaises(EditPlanError):
+            validate_edit_plan(_plan(summary={"not": "text"}), scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
+
+class OperationTypeValidationTests(unittest.TestCase):
+    def test_set_text_requires_string_value(self) -> None:
+        plan = _plan(operations=[{"type": "set_text", "target": "title-01", "value": 123}])
+        with self.assertRaises(EditPlanError):
+            validate_edit_plan(plan, scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
+    def test_set_style_requires_object(self) -> None:
+        plan = _plan(operations=[{"type": "set_style", "target": "title-01", "style": "fill:red"}])
+        with self.assertRaises(EditPlanError):
+            validate_edit_plan(plan, scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
+    def test_set_style_rejects_nested_values(self) -> None:
+        plan = _plan(operations=[{"type": "set_style", "target": "title-01", "style": {"fill": {"bad": True}}}])
+        with self.assertRaises(EditPlanError):
+            validate_edit_plan(plan, scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
+    def test_set_geometry_rejects_non_numeric_value(self) -> None:
+        plan = _plan(operations=[{"type": "set_geometry", "target": "title-01", "geometry": {"x": "ten"}}])
+        with self.assertRaises(EditPlanError):
+            validate_edit_plan(plan, scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
+    def test_set_geometry_rejects_non_geometry_field(self) -> None:
+        plan = _plan(operations=[{"type": "set_geometry", "target": "title-01", "geometry": {"fill": 12}}])
+        with self.assertRaises(EditPlanError):
+            validate_edit_plan(plan, scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
+    def test_translate_requires_numeric_delta(self) -> None:
+        plan = _plan(operations=[{"type": "translate", "target": "title-01", "dx": "5", "dy": 1}])
+        with self.assertRaises(EditPlanError):
+            validate_edit_plan(plan, scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
+    def test_resize_requires_at_least_one_positive_dimension(self) -> None:
+        for op in (
+            {"type": "resize", "target": "title-01"},
+            {"type": "resize", "target": "title-01", "width": 0},
+            {"type": "resize", "target": "title-01", "height": -5},
+        ):
+            with self.subTest(op=op), self.assertRaises(EditPlanError):
+                validate_edit_plan(_plan(operations=[op]), scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
+    def test_fragment_requires_string_markup(self) -> None:
+        plan = _plan(operations=[{"type": "replace_fragment", "target": "title-01", "fragment": {}}])
+        with self.assertRaises(EditPlanError):
+            validate_edit_plan(plan, scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
+    def test_insert_index_must_be_non_negative_integer(self) -> None:
+        plan = _plan(operations=[{"type": "insert_fragment", "parent": "title-01", "fragment": "<g/>", "index": -1}])
+        with self.assertRaises(EditPlanError):
+            validate_edit_plan(plan, scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
+    def test_semantic_tool_arguments_must_be_object(self) -> None:
+        plan = _plan(operations=[{"type": "semantic_tool", "target": "title-01", "tool": "chart.create", "arguments": []}])
+        with self.assertRaises(EditPlanError):
+            validate_edit_plan(plan, scope="selection", selection_ids=["title-01"], current_ids=_CURRENT_IDS)
+
 
 class ScopeValidationTests(unittest.TestCase):
     def test_target_outside_selection_rejected_as_out_of_scope(self) -> None:

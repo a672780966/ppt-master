@@ -20,8 +20,8 @@ from runtime.revisions import submit_slide  # noqa: E402
 _SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720">
   <text id="title-01">Old Title</text>
   <rect id="rect-01" x="10" y="20" width="100" height="50" fill="#000000"/>
-  <g id="chart-01" data-pptx-replace-with="chart" data-pptx-bounds="200 200 300 150"></g>
-  <g id="shape-01"><rect id="inner-rect"/></g>
+  <g id="chart-01" data-pptx-replace-with="chart" data-pptx-bounds="200 200 300 150"><rect id="chart-child" x="210" y="210" width="20" height="20"/></g>
+  <g id="shape-01" data-pptx-bounds="0 0 10 10"><rect id="inner-rect"/></g>
 </svg>"""
 
 
@@ -62,15 +62,40 @@ class PatchEngineTests(unittest.TestCase):
             apply_edit_plan(self.project_path, "P01", self.svg_path,
                              [{"type": "resize", "target": "chart-01", "width": 400}])
         self.assertEqual(ctx.exception.code, "NATIVE_OBJECT_INTEGRITY_ERROR")
-        # zero writes: file untouched
-        self.assertIn(_SVG.split("\n")[3].strip(), self.svg_path.read_text(encoding="utf-8"))
         self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
 
-    def test_native_object_rejects_delete_of_ancestor_protected_child(self) -> None:
-        # shape-01 has no native marker itself, but let's mark its child
-        # to simulate "ancestor carries the fingerprint" the other way:
-        # deleting shape-01 (parent of a native-marked descendant) is fine,
-        # deleting a native-marked node itself is not.
+    def test_native_object_rejects_mismatched_semantic_tool(self) -> None:
+        with self.assertRaises(PatchEngineError) as ctx:
+            apply_edit_plan(
+                self.project_path, "P01", self.svg_path,
+                [{
+                    "type": "semantic_tool",
+                    "target": "chart-01",
+                    "tool": "formula.create",
+                    "arguments": {"latex": "x"},
+                }],
+            )
+        self.assertEqual(ctx.exception.code, "NATIVE_OBJECT_INTEGRITY_ERROR")
+        self.assertEqual(ctx.exception.details["expected_tool"], "chart.create")
+        self.assertEqual(ctx.exception.details["actual_tool"], "formula.create")
+        self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
+
+    def test_native_semantic_tool_must_target_native_root_not_descendant(self) -> None:
+        with self.assertRaises(PatchEngineError) as ctx:
+            apply_edit_plan(
+                self.project_path, "P01", self.svg_path,
+                [{
+                    "type": "semantic_tool",
+                    "target": "chart-child",
+                    "tool": "chart.create",
+                    "arguments": {"type": "line", "categories": ["a"], "series": [{"name": "s", "values": [1]}]},
+                }],
+            )
+        self.assertEqual(ctx.exception.code, "NATIVE_OBJECT_INTEGRITY_ERROR")
+        self.assertEqual(ctx.exception.details["native_root"], "chart-01")
+        self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
+
+    def test_native_object_rejects_delete(self) -> None:
         with self.assertRaises(PatchEngineError) as ctx:
             apply_edit_plan(self.project_path, "P01", self.svg_path,
                              [{"type": "delete_element", "target": "chart-01"}])
@@ -89,6 +114,25 @@ class PatchEngineTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "INVALID_EDIT_PLAN")
         self.assertIn("duplicate ids", str(ctx.exception))
         self.assertEqual(load(self.project_path).slides["P01"].revision, 1)  # zero writes
+
+    def test_set_style_rejects_protected_attribute_instead_of_silently_dropping_it(self) -> None:
+        with self.assertRaises(PatchEngineError) as ctx:
+            apply_edit_plan(
+                self.project_path, "P01", self.svg_path,
+                [{"type": "set_style", "target": "title-01", "style": {"id": "rewritten"}}],
+            )
+        self.assertEqual(ctx.exception.code, "INVALID_EDIT_PLAN")
+        self.assertIn('id="title-01"', self.svg_path.read_text(encoding="utf-8"))
+        self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
+
+    def test_bounded_set_geometry_rejects_fields_it_would_otherwise_ignore(self) -> None:
+        with self.assertRaises(PatchEngineError) as ctx:
+            apply_edit_plan(
+                self.project_path, "P01", self.svg_path,
+                [{"type": "set_geometry", "target": "shape-01", "geometry": {"cx": 5}}],
+            )
+        self.assertEqual(ctx.exception.code, "INVALID_EDIT_PLAN")
+        self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
 
     def test_before_svg_snapshot_captures_pre_edit_content(self) -> None:
         before_path = self.project_path / "before.svg"

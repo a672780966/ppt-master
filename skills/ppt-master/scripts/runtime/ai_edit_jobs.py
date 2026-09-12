@@ -34,7 +34,13 @@ from pathlib import Path
 from runtime import controller
 from runtime.ai_edit_context import SelectionContextError, build_selection_context
 from runtime.build_state import BuildStateError, load as load_build_state
-from runtime.edit_conflicts import EditConflictError, decide_plan_attempt, decide_revision_conflict, check_undo_conflict
+from runtime.edit_conflicts import (
+    MAX_PLAN_ATTEMPTS,
+    EditConflictError,
+    check_undo_conflict,
+    decide_plan_attempt,
+    decide_revision_conflict,
+)
 from runtime.edit_plan import EditPlanError, validate_edit_plan
 from runtime.patch_engine import PatchEngineError, apply_edit_plan, restore_before_svg
 
@@ -239,15 +245,20 @@ def submit_plan(project_path: Path, job_id: str, plan: dict[str, object]) -> AIE
                 plan_revision=state.plan_revision, scope=job.scope, selection_ids=job.selection_ids,
                 instruction=job.instruction, origin=job.origin,
             )
-        except SelectionContextError as exc:
+        except (SelectionContextError, AIEditJobError) as exc:
+            code = exc.code
+            message = exc.message
+            details = exc.details
             job.status = "failed"
-            job.error = {"code": exc.code, "message": exc.message, **exc.details}
+            job.error = {"code": code, "message": message, **details}
             _save_job(job)
-            raise AIEditJobError(exc.code, exc.message, **exc.details) from exc
+            controller.set_ai_edit_status(project_path, job.slide_id, active_job=None, last_job=job.job_id)
+            raise AIEditJobError(code, message, **details) from exc
         (job.dir_path() / "context.json").write_text(json.dumps(context.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
         job.base_revision = current_revision
         job.rebase_count = decision.rebase_count
         job.status = "queued"
+        job.error = None
         _save_job(job)
         raise AIEditJobError("STALE_EDIT", f"revision changed under the AI edit; rebased once, submit a fresh plan against revision {current_revision}", rebase_count=job.rebase_count)
     if decision.outcome == "stop":
@@ -260,23 +271,43 @@ def submit_plan(project_path: Path, job_id: str, plan: dict[str, object]) -> AIE
     (job.dir_path() / "plan.json").write_text(json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8")
     job.plan_attempts += 1
     job.status = "applying"
+    job.error = None
     _save_job(job)
 
     current_ids, svg_path = _current_ids(project_path, job.slide_id)
     try:
         decide_plan_attempt(job.plan_attempts)
-        operations = validate_edit_plan(plan, scope=job.scope, selection_ids=job.selection_ids, current_ids=current_ids)
+        operations = validate_edit_plan(
+            plan,
+            scope=job.scope,
+            selection_ids=job.selection_ids,
+            current_ids=current_ids,
+            expected_base_revision=job.base_revision,
+        )
         result = apply_edit_plan(
             project_path, job.slide_id, svg_path, operations,
             before_svg_path=job.dir_path() / "before.svg",
             clear_annotation_id=job.annotation_id if job.origin == "annotation" else None,
         )
     except (EditPlanError, PatchEngineError, EditConflictError) as exc:
-        job.status = "failed"
+        retryable_schema_error = (
+            isinstance(exc, EditPlanError)
+            and exc.code == "INVALID_EDIT_PLAN"
+            and job.plan_attempts < MAX_PLAN_ATTEMPTS
+        )
+        job.status = "queued" if retryable_schema_error else "failed"
         job.error = {"code": exc.code, "message": exc.message, **getattr(exc, "details", {})}
         _save_job(job)
-        controller.set_ai_edit_status(project_path, job.slide_id, active_job=None, last_job=job.job_id)
-        raise AIEditJobError(exc.code, exc.message, **getattr(exc, "details", {})) from exc
+        if not retryable_schema_error:
+            controller.set_ai_edit_status(project_path, job.slide_id, active_job=None, last_job=job.job_id)
+        raise AIEditJobError(
+            exc.code,
+            exc.message,
+            retryable=retryable_schema_error,
+            attempts=job.plan_attempts,
+            max_attempts=MAX_PLAN_ATTEMPTS,
+            **getattr(exc, "details", {}),
+        ) from exc
 
     validated_ok = bool(result.validate_envelope.get("ok"))
     job.status = "completed" if validated_ok else "completed_with_validation_error"

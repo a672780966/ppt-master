@@ -84,15 +84,61 @@ class SubmitPlanHappyPathTests(AIEditJobsTestCase):
         self.assertIsNone(state.slides["P01"].ai_edit_active_job)
         self.assertEqual(state.slides["P01"].ai_edit_last_job, job.job_id)
 
-    def test_invalid_plan_fails_with_zero_writes(self) -> None:
+    def test_invalid_schema_gets_exactly_one_repair_attempt_with_zero_writes(self) -> None:
         job = self._create()
         bad_plan = {"scope": "selection", "base_revision": 1, "operations": []}
+
+        with self.assertRaises(jobs.AIEditJobError) as first:
+            jobs.submit_plan(self.project_path, job.job_id, bad_plan)
+        self.assertEqual(first.exception.code, "INVALID_EDIT_PLAN")
+        self.assertTrue(first.exception.details["retryable"])
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "queued")
+        self.assertIn("Old Title", self.svg_path.read_text(encoding="utf-8"))
+        self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
+
+        with self.assertRaises(jobs.AIEditJobError) as second:
+            jobs.submit_plan(self.project_path, job.job_id, bad_plan)
+        self.assertEqual(second.exception.code, "INVALID_EDIT_PLAN")
+        self.assertFalse(second.exception.details["retryable"])
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "failed")
+        self.assertIsNone(load(self.project_path).slides["P01"].ai_edit_active_job)
+        self.assertIn("Old Title", self.svg_path.read_text(encoding="utf-8"))
+
+    def test_plan_base_revision_mismatch_is_rejected_before_apply(self) -> None:
+        job = self._create()
+        with self.assertRaises(jobs.AIEditJobError) as ctx:
+            jobs.submit_plan(self.project_path, job.job_id, _valid_plan(99))
+        self.assertEqual(ctx.exception.code, "INVALID_EDIT_PLAN")
+        self.assertTrue(ctx.exception.details["retryable"])
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "queued")
+        self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
+        self.assertIn("Old Title", self.svg_path.read_text(encoding="utf-8"))
+
+        result = jobs.submit_plan(self.project_path, job.job_id, _valid_plan(1))
+        self.assertEqual(result.status, "completed")
+        # The stale error from the first, rejected submission must not
+        # linger on the job once a corrected plan actually completes.
+        self.assertIsNone(result.error)
+
+    def test_malformed_operation_value_never_strands_the_job_in_applying(self) -> None:
+        """A model-produced type error (string dx instead of numeric) must be
+        caught by validate_edit_plan before Patch Engine ever runs -- not
+        surface as an uncaught float()/.items() TypeError that would leave
+        the job stuck in "applying" forever."""
+        job = self._create()
+        bad_plan = {
+            "scope": "selection", "base_revision": 1, "summary": "nudge",
+            "operations": [{"type": "translate", "target": "title-01", "dx": "5", "dy": 1}],
+        }
         with self.assertRaises(jobs.AIEditJobError) as ctx:
             jobs.submit_plan(self.project_path, job.job_id, bad_plan)
         self.assertEqual(ctx.exception.code, "INVALID_EDIT_PLAN")
+        self.assertTrue(ctx.exception.details["retryable"])
+        loaded = jobs.load_job(self.project_path, job.job_id)
+        self.assertEqual(loaded.status, "queued")
+        self.assertNotEqual(loaded.status, "applying")
         self.assertIn("Old Title", self.svg_path.read_text(encoding="utf-8"))
         self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
-        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "failed")
 
     def test_out_of_scope_plan_fails(self) -> None:
         job = self._create()
@@ -101,6 +147,7 @@ class SubmitPlanHappyPathTests(AIEditJobsTestCase):
         with self.assertRaises(jobs.AIEditJobError) as ctx:
             jobs.submit_plan(self.project_path, job.job_id, plan)
         self.assertEqual(ctx.exception.code, "OUT_OF_SCOPE_EDIT")
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "failed")
 
 
 class ConflictControlTests(AIEditJobsTestCase):
@@ -135,7 +182,7 @@ class ConflictControlTests(AIEditJobsTestCase):
         self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "conflicted")
         self.assertIn("Old Title", self.svg_path.read_text(encoding="utf-8"))  # never applied
 
-    def test_selection_disappearing_during_rebase_is_reported(self) -> None:
+    def test_selection_disappearing_during_rebase_is_terminal_and_releases_slide(self) -> None:
         job = self._create()  # selection_ids=["title-01"]
         # Someone else deletes the selected element directly (not through
         # the AI Edit job system) while the "model" is thinking.
@@ -150,6 +197,77 @@ class ConflictControlTests(AIEditJobsTestCase):
         with self.assertRaises(jobs.AIEditJobError) as ctx:
             jobs.submit_plan(self.project_path, job.job_id, _valid_plan(1))
         self.assertEqual(ctx.exception.code, "SELECTION_NO_LONGER_EXISTS")
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "failed")
+        self.assertIsNone(load(self.project_path).slides["P01"].ai_edit_active_job)
+
+
+class NativeObjectIntegrityJobTests(unittest.TestCase):
+    """The Native Object Integrity Gate exercised through the full job
+    lifecycle (create -> submit_plan), not just patch_engine's own unit
+    tests -- confirms a rejected native-object plan actually fails the job
+    and frees the slide, the same way any other terminal EditPlanError/
+    PatchEngineError does."""
+
+    _SVG = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" '
+        'data-pptx-page-role="content" font-family="Arial">'
+        '<g id="chart-01" data-pptx-replace-with="chart" data-pptx-bounds="200 200 300 150" '
+        'data-pptx-fallback-sha256="x"><metadata type="application/json">{"type": "column"}</metadata>'
+        '<rect id="chart-child" x="210" y="210" width="20" height="20"/></g>'
+        "</svg>"
+    )
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project_path = Path(self._tmp.name)
+        svg_dir = self.project_path / "svg_output"
+        svg_dir.mkdir()
+        self.svg_path = svg_dir / "01_cover.svg"
+        self.svg_path.write_text(self._SVG, encoding="utf-8")
+        controller.init_state(self.project_path, route="quick", pages=["P01"])
+        submit_slide(self.project_path, "P01", expected_revision=0, status="ready", from_file=self.svg_path)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_mismatched_semantic_tool_on_a_native_object_fails_the_job(self) -> None:
+        job = jobs.create_job(
+            self.project_path, slide_id="P01", scope="selection",
+            selection_ids=["chart-01"], instruction="turn this chart into a formula",
+        )
+        before_svg = self.svg_path.read_text(encoding="utf-8")
+        plan = {
+            "scope": "selection", "base_revision": job.base_revision, "summary": "wrong tool",
+            "operations": [{"type": "semantic_tool", "target": "chart-01", "tool": "formula.create", "arguments": {"latex": "x"}}],
+        }
+        with self.assertRaises(jobs.AIEditJobError) as ctx:
+            jobs.submit_plan(self.project_path, job.job_id, plan)
+        self.assertEqual(ctx.exception.code, "NATIVE_OBJECT_INTEGRITY_ERROR")
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "failed")
+        self.assertIsNone(load(self.project_path).slides["P01"].ai_edit_active_job)
+        self.assertEqual(self.svg_path.read_text(encoding="utf-8"), before_svg)
+        self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
+
+    def test_semantic_tool_targeting_a_native_descendant_instead_of_its_root_fails_the_job(self) -> None:
+        job = jobs.create_job(
+            self.project_path, slide_id="P01", scope="selection",
+            selection_ids=["chart-child"], instruction="replace this bar with a fresh chart",
+        )
+        before_svg = self.svg_path.read_text(encoding="utf-8")
+        plan = {
+            "scope": "selection", "base_revision": job.base_revision, "summary": "wrong target",
+            "operations": [{
+                "type": "semantic_tool", "target": "chart-child", "tool": "chart.create",
+                "arguments": {"type": "column", "categories": ["a"], "series": [{"name": "s", "values": [1]}]},
+            }],
+        }
+        with self.assertRaises(jobs.AIEditJobError) as ctx:
+            jobs.submit_plan(self.project_path, job.job_id, plan)
+        self.assertEqual(ctx.exception.code, "NATIVE_OBJECT_INTEGRITY_ERROR")
+        self.assertEqual(ctx.exception.details.get("native_root"), "chart-01")
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "failed")
+        self.assertIsNone(load(self.project_path).slides["P01"].ai_edit_active_job)
+        self.assertEqual(self.svg_path.read_text(encoding="utf-8"), before_svg)
 
 
 class CancelRetryUndoTests(AIEditJobsTestCase):
@@ -161,10 +279,13 @@ class CancelRetryUndoTests(AIEditJobsTestCase):
             jobs.submit_plan(self.project_path, job.job_id, _valid_plan(1))
         self.assertEqual(ctx.exception.code, "AI_EDIT_CANCELLED")
 
-    def test_retry_spawns_a_fresh_job_from_a_failed_one(self) -> None:
+    def test_retry_spawns_a_fresh_job_from_a_terminal_failure(self) -> None:
         job = self._create()
+        plan = _valid_plan(1)
+        plan["operations"] = [{"type": "delete_element", "target": "shape-01"}]
         with self.assertRaises(jobs.AIEditJobError):
-            jobs.submit_plan(self.project_path, job.job_id, {"scope": "selection", "base_revision": 1, "operations": []})
+            jobs.submit_plan(self.project_path, job.job_id, plan)
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "failed")
         retried = jobs.retry_job(self.project_path, job.job_id)
         self.assertNotEqual(retried.job_id, job.job_id)
         self.assertEqual(retried.status, "queued")

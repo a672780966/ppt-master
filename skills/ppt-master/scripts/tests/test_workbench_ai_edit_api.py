@@ -103,6 +103,27 @@ class AIEditApiTests(unittest.TestCase):
         self.assertTrue(retry["ok"])
         self.assertNotEqual(retry["job"]["job_id"], job_id)
 
+    def test_schema_repair_retry_surfaces_through_the_api(self) -> None:
+        create = self.client.post("/api/runtime/ai-edits", json={
+            "slide_id": "P01", "scope": "selection", "selection_ids": ["title-01"], "instruction": "shorten it",
+        }).get_json()
+        job_id = create["job"]["job_id"]
+
+        bad_plan = {"scope": "selection", "base_revision": 1, "operations": [
+            {"type": "set_style", "target": "title-01", "style": "fill:red"}]}
+        first = self.client.post(f"/api/runtime/ai-edits/{job_id}/plan", json=bad_plan).get_json()
+        self.assertFalse(first["ok"])
+        self.assertEqual(first["errors"][0]["code"], "INVALID_EDIT_PLAN")
+        self.assertTrue(first["errors"][0]["retryable"])
+        self.assertEqual(self.client.get(f"/api/runtime/ai-edits/{job_id}").get_json()["job"]["status"], "queued")
+
+        good_plan = {"scope": "selection", "base_revision": 1, "summary": "fix", "operations": [
+            {"type": "set_text", "target": "title-01", "value": "New"}]}
+        second = self.client.post(f"/api/runtime/ai-edits/{job_id}/plan", json=good_plan).get_json()
+        self.assertTrue(second["ok"])
+        self.assertEqual(second["job"]["status"], "completed")
+        self.assertIsNone(second["job"]["error"])
+
     def test_unknown_job_id_returns_error_envelope_not_a_500(self) -> None:
         resp = self.client.get("/api/runtime/ai-edits/does-not-exist")
         self.assertEqual(resp.status_code, 200)
