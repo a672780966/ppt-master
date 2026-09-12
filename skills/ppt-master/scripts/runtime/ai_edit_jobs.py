@@ -258,6 +258,7 @@ def submit_plan(project_path: Path, job_id: str, plan: dict[str, object]) -> AIE
         job.base_revision = current_revision
         job.rebase_count = decision.rebase_count
         job.status = "queued"
+        job.error = None
         _save_job(job)
         raise AIEditJobError("STALE_EDIT", f"revision changed under the AI edit; rebased once, submit a fresh plan against revision {current_revision}", rebase_count=job.rebase_count)
     if decision.outcome == "stop":
@@ -270,6 +271,7 @@ def submit_plan(project_path: Path, job_id: str, plan: dict[str, object]) -> AIE
     (job.dir_path() / "plan.json").write_text(json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8")
     job.plan_attempts += 1
     job.status = "applying"
+    job.error = None
     _save_job(job)
 
     current_ids, svg_path = _current_ids(project_path, job.slide_id)
