@@ -84,15 +84,38 @@ class SubmitPlanHappyPathTests(AIEditJobsTestCase):
         self.assertIsNone(state.slides["P01"].ai_edit_active_job)
         self.assertEqual(state.slides["P01"].ai_edit_last_job, job.job_id)
 
-    def test_invalid_plan_fails_with_zero_writes(self) -> None:
+    def test_invalid_schema_gets_exactly_one_repair_attempt_with_zero_writes(self) -> None:
         job = self._create()
         bad_plan = {"scope": "selection", "base_revision": 1, "operations": []}
-        with self.assertRaises(jobs.AIEditJobError) as ctx:
+
+        with self.assertRaises(jobs.AIEditJobError) as first:
             jobs.submit_plan(self.project_path, job.job_id, bad_plan)
-        self.assertEqual(ctx.exception.code, "INVALID_EDIT_PLAN")
+        self.assertEqual(first.exception.code, "INVALID_EDIT_PLAN")
+        self.assertTrue(first.exception.details["retryable"])
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "queued")
         self.assertIn("Old Title", self.svg_path.read_text(encoding="utf-8"))
         self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
+
+        with self.assertRaises(jobs.AIEditJobError) as second:
+            jobs.submit_plan(self.project_path, job.job_id, bad_plan)
+        self.assertEqual(second.exception.code, "INVALID_EDIT_PLAN")
+        self.assertFalse(second.exception.details["retryable"])
         self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "failed")
+        self.assertIsNone(load(self.project_path).slides["P01"].ai_edit_active_job)
+        self.assertIn("Old Title", self.svg_path.read_text(encoding="utf-8"))
+
+    def test_plan_base_revision_mismatch_is_rejected_before_apply(self) -> None:
+        job = self._create()
+        with self.assertRaises(jobs.AIEditJobError) as ctx:
+            jobs.submit_plan(self.project_path, job.job_id, _valid_plan(99))
+        self.assertEqual(ctx.exception.code, "INVALID_EDIT_PLAN")
+        self.assertTrue(ctx.exception.details["retryable"])
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "queued")
+        self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
+        self.assertIn("Old Title", self.svg_path.read_text(encoding="utf-8"))
+
+        result = jobs.submit_plan(self.project_path, job.job_id, _valid_plan(1))
+        self.assertEqual(result.status, "completed")
 
     def test_out_of_scope_plan_fails(self) -> None:
         job = self._create()
@@ -101,6 +124,7 @@ class SubmitPlanHappyPathTests(AIEditJobsTestCase):
         with self.assertRaises(jobs.AIEditJobError) as ctx:
             jobs.submit_plan(self.project_path, job.job_id, plan)
         self.assertEqual(ctx.exception.code, "OUT_OF_SCOPE_EDIT")
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "failed")
 
 
 class ConflictControlTests(AIEditJobsTestCase):
@@ -135,7 +159,7 @@ class ConflictControlTests(AIEditJobsTestCase):
         self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "conflicted")
         self.assertIn("Old Title", self.svg_path.read_text(encoding="utf-8"))  # never applied
 
-    def test_selection_disappearing_during_rebase_is_reported(self) -> None:
+    def test_selection_disappearing_during_rebase_is_terminal_and_releases_slide(self) -> None:
         job = self._create()  # selection_ids=["title-01"]
         # Someone else deletes the selected element directly (not through
         # the AI Edit job system) while the "model" is thinking.
@@ -150,6 +174,8 @@ class ConflictControlTests(AIEditJobsTestCase):
         with self.assertRaises(jobs.AIEditJobError) as ctx:
             jobs.submit_plan(self.project_path, job.job_id, _valid_plan(1))
         self.assertEqual(ctx.exception.code, "SELECTION_NO_LONGER_EXISTS")
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "failed")
+        self.assertIsNone(load(self.project_path).slides["P01"].ai_edit_active_job)
 
 
 class CancelRetryUndoTests(AIEditJobsTestCase):
@@ -161,10 +187,13 @@ class CancelRetryUndoTests(AIEditJobsTestCase):
             jobs.submit_plan(self.project_path, job.job_id, _valid_plan(1))
         self.assertEqual(ctx.exception.code, "AI_EDIT_CANCELLED")
 
-    def test_retry_spawns_a_fresh_job_from_a_failed_one(self) -> None:
+    def test_retry_spawns_a_fresh_job_from_a_terminal_failure(self) -> None:
         job = self._create()
+        plan = _valid_plan(1)
+        plan["operations"] = [{"type": "delete_element", "target": "shape-01"}]
         with self.assertRaises(jobs.AIEditJobError):
-            jobs.submit_plan(self.project_path, job.job_id, {"scope": "selection", "base_revision": 1, "operations": []})
+            jobs.submit_plan(self.project_path, job.job_id, plan)
+        self.assertEqual(jobs.load_job(self.project_path, job.job_id).status, "failed")
         retried = jobs.retry_job(self.project_path, job.job_id)
         self.assertNotEqual(retried.job_id, job.job_id)
         self.assertEqual(retried.status, "queued")
