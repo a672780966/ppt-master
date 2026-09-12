@@ -13,10 +13,10 @@ dirty, export.dirty) followed by tools.dispatch.invoke("slide.validate",
 revision or validation logic lives here.
 
 Hard rule: an AI edit never touches a native chart/table/formula/shape
-group except through the matching semantic_tool operation -- the Native
-Object Integrity Gate (apply_edit_plan's _check_native_integrity) rejects
-any other operation type or mismatched semantic tool whose target or
-ancestor carries a native fingerprint, with zero writes.
+group except through the matching semantic_tool operation targeted at that
+native object's own root id -- the Native Object Integrity Gate rejects any
+other operation type, mismatched semantic tool, or descendant-targeted
+native replacement with zero writes.
 
 Usage:
     from runtime.patch_engine import apply_edit_plan, PatchEngineError
@@ -127,6 +127,14 @@ def _check_native_integrity(
                     f"{anchor_id!r} is (or is inside) a native object; only a matching semantic_tool operation may modify it",
                     target=anchor_id,
                 )
+            if node is not elem:
+                native_root = node.get("id")
+                raise PatchEngineError(
+                    "NATIVE_OBJECT_INTEGRITY_ERROR",
+                    f"semantic_tool must target the native object root, not descendant {anchor_id!r}",
+                    target=anchor_id,
+                    native_root=native_root,
+                )
             expected_tool = _expected_semantic_tool(node)
             if expected_tool is None or semantic_tool != expected_tool:
                 raise PatchEngineError(
@@ -198,6 +206,13 @@ def _apply_set_geometry(root: ET.Element, target: str, geometry: dict[str, objec
     elem = find_by_id(root, target)
     attr, bounds = _read_bounds(elem)
     if attr:
+        unsupported = sorted(set(geometry) - {"x", "y", "width", "height"})
+        if unsupported:
+            raise PatchEngineError(
+                "INVALID_EDIT_PLAN",
+                f"set_geometry on bounded object {target!r} only supports x/y/width/height; got {unsupported}",
+                target=target,
+            )
         x, y, w, h = bounds
         x = float(geometry.get("x", x))
         y = float(geometry.get("y", y))
