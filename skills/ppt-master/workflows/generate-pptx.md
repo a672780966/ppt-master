@@ -129,7 +129,35 @@ This is a capability map, not a usage checklist; direction construction follows 
 
 **Only the user confirms**: the agent authors recommendations, operates the server, reads state, and applies a template. It never confirms on the user's behalf, automates submission, synthesizes a payload, or writes user result state; silence confirms nothing. Under explicit delegation the agent makes the Stage-1 decision, installs it, derives Stage 2, and presents one complete summary without fabricating UI receipts.
 
-**UI branch** — `template_options.json` (Step 3), `recommendations.stage1.json`, `template_handoff.json` (written only by `--complete-template-selection`), and `recommendations.stage2.json` are agent inputs; `template_selection.json` and `result.json` are user receipts. Only the active unconfirmed stage file may be overwritten, in place, never with a revision suffix or another stage's payload. Author Stage 1 without reading candidates, launch, post the [`confirm-surface.md`](../references/confirm-surface.md) handoff summary, then wait:
+**UI branch — Workbench (default, P5)** — the Unified Workbench
+([`workbench.md`](../scripts/docs/workbench.md)) is already running before
+Stage 1 begins (its auto-startup moves here, ahead of the "Live Preview
+Auto-Startup" paragraph in Step 6 below, and it stays running through that
+step too — one process, one browser tab, for the whole build):
+
+```bash
+python3 ${SKILL_DIR}/scripts/svg_editor/server.py <project_path> --live --daemon
+```
+
+Author `template_options.json` and `recommendations.stage1.json` exactly as
+below, post the [`confirm-surface.md`](../references/confirm-surface.md)
+handoff summary with the Workbench's own URL (no separate Confirm UI port),
+then wait for `result.json` + `template_selection.json` to appear (poll
+their mtimes, or continue once the user says so in chat) — the user
+confirms inside the same Workbench tab's Confirmation panel
+(`POST /api/confirm/submit`, which writes the identical `result.json` /
+`template_selection.json` the Legacy branch below produces), never a
+second page. What's actually eliminated versus Legacy is the separate
+server's own launch/port/lock/shutdown lifecycle — not the underlying fact
+that a human decision is still being waited on. Stage 2 follows the same
+pattern: author `recommendations.stage2.json`, wait for the final
+`result.json`, then continue exactly as Legacy's numbered steps below
+(template installation via `--complete-template-selection`, reading
+`result.json` once, proceeding on `stage: final` + `status: confirmed`) —
+there is no `--shutdown` step, since the Workbench keeps running into
+generation, editing, and export.
+
+**UI branch — Legacy (fallback)** — `template_options.json` (Step 3), `recommendations.stage1.json`, `template_handoff.json` (written only by `--complete-template-selection`), and `recommendations.stage2.json` are agent inputs; `template_selection.json` and `result.json` are user receipts. Only the active unconfirmed stage file may be overwritten, in place, never with a revision suffix or another stage's payload. Author Stage 1 without reading candidates, launch, post the [`confirm-surface.md`](../references/confirm-surface.md) handoff summary, then wait:
 
 ```bash
 python3 ${SKILL_DIR}/scripts/confirm_ui/server.py <project_path> --daemon
@@ -237,31 +265,40 @@ Read ${SKILL_DIR}/references/visual-styles/<resolved-id>.md # one preset id, or 
 
 Read the core as one batch with the exact detail files named by the retained `spec_lock.md`, then every module the roster sweep triggers. Never reopen the planning indexes, infer adjacent bases, glob a catalog, or blend unselected identities (an unreferenced custom follows its behavior alone). Conditional modules load on [`executor-base.md`](../references/executor-base.md)'s routing table, never by analogy; `video-design.md` is read before the first SVG when §I records recorded/self-running/video delivery or §X a literal script. Read each reference once per valid context.
 
-**Context validity**: reuse the retained Design Spec and lock for every page while the context is unchanged and uncompacted; do not reread or poll them. On local uncertainty consult the retained lock, then only the owning Design Spec fragment — sources supply facts only, and the Design Spec wins a conflict.
+**Context validity**: read the complete Design Spec and lock once per valid, uncompacted context to establish the whole-deck picture (motif, production toggles, communication contract) — never per page. Per page, call the Context Compiler instead of re-consulting memory of the full lock text:
+
+```bash
+python3 ${SKILL_DIR}/scripts/project_manager.py page-context <project_path> P<NN> --compile
+```
+
+This reads live from disk and recomputes fresh every call, so there is no periodic full-lock re-read to schedule and no staleness window to guard against — a superseded "five-page lock re-read" rule from before this compiler existed. On local uncertainty beyond the compiled page-context payload, consult the retained lock, then only the owning Design Spec fragment — sources supply facts only, and the Design Spec wins a conflict.
 
 | Situation | Read |
 |---|---|
 | Fresh, resumed, restarted, compacted, or externally changed context | `design_spec.md`, then `spec_lock.md`, once, plus triggered references and the latest completed SVG when mid-deck ([`failure-recovery.md`](governance/failure-recovery.md)) |
+| Before every page's first coordinate | `page-context <project_path> P<NN> --compile`; author from its compact `global` + `page_context` payload instead of re-reading the full files |
+| `--compile` prints `[COMPILER_FALLBACK]` (exit 5) — missing/ambiguous data, a failed structural preflight, an unresolved visualization key | Reversible fallback: read the complete `design_spec.md` and `spec_lock.md` for this one page exactly as documented before this compiler existed, author it, then resume compiling from the next page; `design_spec.md`/`spec_lock.md` stay the only source of design truth in either branch |
 | Bounded same-context repair that preserves roster/order/identity/communication | Only the affected fragment readback plus `project_manager.py validate` |
-| **Five-page lock re-read** — after P05, P10, P15, … when another page follows | `spec_lock.md` in full once before the next page: a pure re-anchor of palette, typography, icon style, and `page_rhythm` under long context, with no checker run, no output, no pause, and no repair loop; an external change found here follows the recovery branch |
 | §X records a literal script | The frozen `notes/total.md` once before P01; design each visible state around its segment |
 | Missing `spec_lock.md` or `design_spec.md` | Stop and report the missing gate artifact; recover through [`failure-recovery.md`](governance/failure-recovery.md) §3; a missing field in an existing lock → its §2 |
 
 **Hard rule — exact page roster**: `design_spec.md §IX` is the ordered queue — one final slide per entry, same id and order; never add, drop, merge, split, or reorder while drawing. A continuous run may first repair the affected §IX blocks and `page_rhythm` rows and rerun `validate` while the count stays inside the Stage-1 confirmed range; leaving that range reconfirms Stage 1. §IX is preferred wording and semantic authority, adapted only under `executor-base.md` §2.1's content-vs-expression contract, with sources read only for verification.
 
-**Image inventory**: trust the latest `analysis/image_analysis.csv` (rerun `analyze_images.py` if `images/` changed; an empty folder means no inventory). `page-context` is a diagnostic only ([`artifact-ownership.md`](../references/artifact-ownership.md) §1).
+**Image inventory**: trust the latest `analysis/image_analysis.csv` (rerun `analyze_images.py` if `images/` changed; an empty folder means no inventory). `page-context --compile` is the production per-page Context Compiler, not a diagnostic ([`artifact-ownership.md`](../references/artifact-ownership.md) §1); `--record-usage` (no `--compile`) remains the separate ad-hoc telemetry/routing-diagnostic mode.
 
 **Design Parameter Confirmation (Mandatory)**: before the first SVG, output one confirmation listing the compact communication objective, canvas dimensions, body font size, color scheme (primary/secondary/accent HEX), font plan, the per-role calibration table, and the live-preview URL from the launcher below. The calibration table comes from `python3 ${SKILL_DIR}/scripts/text_measure.py calibrate <project_path> --outline`: every lock role with family, size, CJK and Latin ≈ chars per 100 px, and the longest planned §IX line per role in px — the checker's own estimator with wrapping headroom, written to `validation/text_calibration.json`. If the preview failed to launch, say so here rather than proceeding silently.
 
-**Live Preview Auto-Startup (Mandatory)**: before the first SVG, start the editor and keep it running through Step 7:
+**Live Preview / Workbench Auto-Startup (Mandatory)**: before the first SVG, start the editor and keep it running through Step 7. On the Workbench branch above this is almost always already running from before Stage 1 — the same command is idempotent (an existing live lock is detected and reused, never double-launched):
 
 ```bash
 python3 ${SKILL_DIR}/scripts/svg_editor/server.py <project_path> --live --daemon
 ```
 
-Default first free port from `6060` (`--port N` binds strictly); read the URL from output or `<project_path>/live_preview/lock.json` and report it — or the launch failure, or that the user or run instructions forbade starting it — before the first SVG. It is a side process: never wait for it or for user confirmation, and keep it running until the user clicks **Exit preview** or asks in chat. Do not read or apply submitted annotations during generation; that window opens after Step 7 ([`live-preview.md`](stages/live-preview.md), which also describes staged direct edits).
+Default first free port from `6060` (`--port N` binds strictly); read the URL from output or `<project_path>/live_preview/lock.json` and report it — or the launch failure, or that the user or run instructions forbade starting it — before the first SVG. It is a side process: never wait for it or for user confirmation, and keep it running until the user clicks **Exit preview** or asks in chat. Do not read or apply submitted annotations during generation; that window opens after Step 7 ([`live-preview.md`](stages/live-preview.md), which also describes staged direct edits). A direct edit made through the running editor now automatically bumps that slide's `build_state.json` revision and stales its validation (`scripts/docs/workbench.md` — P5's `edit_wiring.record_direct_edit()`); the Executor does not need to do anything extra for that to happen.
 
 **Cadence (Mandatory)**: P01–P05 → early gate (a planned roster of six or fewer pages skips it) → remaining pages → final gate, in one context. Every checker invocation follows one of two events: a gate point whose covered pages all exist, or the end of one consolidated repair pass. A run with neither predecessor is a pacing violation; validating an authoring pattern early is not a reason, because the same issues surface at the gate and are fixed in the same pass. Reload under Context validity above after context invalidation.
+
+**Optional build-state bookkeeping**: when `<project_path>/build_state.json` exists ([`artifact-ownership.md`](../references/artifact-ownership.md) build_state.json row), the Executor MAY call `python3 ${SKILL_DIR}/scripts/build_state.py submit-slide <project_path> <PNN> --expected-revision <N> --status ready --from-file svg_output/<PNN>.svg` after finishing each page, and `set-gate <project_path> early|final <status> --report <path>` after each checker run. This is bookkeeping only, never a blocking gate — a `STALE_EDIT` response here means Live Preview's direct-edit path or another job already changed this slide and must be reconciled, never silently overwritten. A project with no `build_state.json` skips this paragraph entirely.
 
 **Visual Construction Phase**: generate pages sequentially into `<project_path>/svg_output/`. Each SVG carries the slide's complete visible design (a JSON-first Chart/Table is the sole exception: inline JSON authoritative, visible subtree an approximate preview). Native shapes follow [`native-shape-authoring.md`](../references/native-shape-authoring.md), loaded at the first contour beyond basic primitives while the preset vocabulary is read before page one: independent atoms first, Merge Shapes only when contour semantics require it, freeform last.
 
@@ -272,14 +309,20 @@ Default first free port from `6060` (`--port N` binds strictly); read the URL fr
 
 **Motion endpoints**: when custom motion is active — an explicit user motion instruction, an enabled Custom Animations outcome in §I, or an existing `animations.json` — author the visible endpoint states now under [`executor-base.md`](../references/executor-base.md) §1; a §IX suggestion alone activates nothing.
 
-**Early gate (Mandatory)** — after the fifth SVG, before page 6; a planned roster of six or fewer pages skips this gate and goes straight to the final gate:
+**Early gate (Mandatory)** — after the fifth SVG, before page 6; a planned roster of six or fewer pages skips this gate and goes straight to the final gate. Run it through the Semantic Tool Layer (page completed → `slide.validate`, [`semantic_tools.md`](../scripts/docs/semantic_tools.md)) — same checker, same report file, already reduced to a short `{ok, errors:[{code, element, severity, suggested_action}]}` envelope instead of the raw report:
+
+```bash
+python3 ${SKILL_DIR}/scripts/semantic_tools.py slide.validate --input '{"project":"<project_path>","stage":"early"}'
+```
+
+or equivalently call the checker directly:
 
 ```bash
 python3 ${SKILL_DIR}/scripts/svg_quality_checker.py <project_path> \
   --canonical-authoring --stage early --json
 ```
 
-`--json` writes the report file (`validation/svg_quality_early_report.json`); stdout stays the human-readable summary and is never parsed as JSON. The stage checks every authored page so far under the partial-roster rules. Repair under the consolidated-pass discipline in [`executor-base.md`](../references/executor-base.md) §3; a still-failing verification is the next batch. If terminal output is truncated, extract only `categories.blocking.issues` (and `categories.introduced.issues` when needed) from `validation/svg_quality_early_report.json`. The gate validates the method, not just the pages — emit one line before editing (in the conversation, not to a file):
+Either form writes the same report file (`validation/svg_quality_early_report.json`); the raw command's stdout stays the human-readable summary and is never parsed as JSON. The stage checks every authored page so far under the partial-roster rules. Repair under the consolidated-pass discipline in [`executor-base.md`](../references/executor-base.md) §3; a still-failing verification is the next batch. If terminal output is truncated, extract only `categories.blocking.issues` (and `categories.introduced.issues` when needed) from `validation/svg_quality_early_report.json` — or read `slide.validate`'s `errors` field, which is already that extraction, classified. The gate validates the method, not just the pages — emit one line before editing (in the conversation, not to a file):
 
 ```
 gate-signal: method=<rule resolved, or none> | page-local=<count> | not-exercised=<list>
@@ -293,7 +336,13 @@ gate-signal: method=<rule resolved, or none> | page-local=<count> | not-exercise
 
 `not-exercised` names what P01–P05 could not test (five pages usually exercise multi-line text, columns, and captions; charts, tables, or other data objects may still be pending); carry each resolved rule forward as arithmetic. Every later page runs without checker calls; a listed item first exercised later is held to the carried-forward rule and caught by the final gate.
 
-**Quality Check Gate (Mandatory)** — only after every planned SVG exists, before annotations and speaker notes:
+**Quality Check Gate (Mandatory)** — only after every planned SVG exists, before annotations and speaker notes. Via `slide.validate` (page completed → `slide.validate`):
+
+```bash
+python3 ${SKILL_DIR}/scripts/semantic_tools.py slide.validate --input '{"project":"<project_path>","stage":"final"}'
+```
+
+or equivalently:
 
 ```bash
 python3 ${SKILL_DIR}/scripts/svg_quality_checker.py <project_path> \
@@ -301,10 +350,10 @@ python3 ${SKILL_DIR}/scripts/svg_quality_checker.py <project_path> \
 ```
 
 - Before the gate, every §IX `Native-ready` `<object-key>=yes` has its draw-time marker group and JSON child; `=no` and incidental microvisuals stay ordinary SVG (a legacy bare `yes|no` is readable only when the page has exactly one eligible object). JSON-first Chart/Table validates inline schema/bounds; SVG-first markers need a current `data-pptx-fallback-sha256`, stamped after synchronization — missing or stale baselines block canonical/native export, not fallback export.
-- `--json` writes `validation/svg_quality_report.json`, the report the exporter fingerprints against `svg_output/`; stdout stays the human-readable summary and is never parsed as JSON. Without `--json` the export is refused.
-- One run against `svg_output/` reports every page; repair under the consolidated-pass discipline in [`executor-base.md`](../references/executor-base.md) §3. If output is truncated, extract only `categories.blocking.issues` (and `categories.introduced.issues` when needed) from that run's `validation/svg_quality_report.json`, where `inherited` and `source-import` are provenance and `introduced` holds changed/new warnings.
+- Both forms write `validation/svg_quality_report.json`, the report the exporter fingerprints against `svg_output/`; the raw command's stdout stays the human-readable summary and is never parsed as JSON. Without `--json` the export is refused.
+- One run against `svg_output/` reports every page; repair under the consolidated-pass discipline in [`executor-base.md`](../references/executor-base.md) §3. If output is truncated, extract only `categories.blocking.issues` (and `categories.introduced.issues` when needed) from that run's `validation/svg_quality_report.json` — or read `slide.validate`'s `errors` field, already that extraction — where `inherited` and `source-import` are provenance and `introduced` holds changed/new warnings.
 - Structured-template warnings (empty/framing-only Layout, bare Master, duplicate layout keys) guide optional cleanup only; a condition that must be corrected before release is an `error`.
-- **Hard rule — token-safe report handling**: on success use the exit status and terminal summary; never `cat` the complete JSON into context. Read it only for failure investigation, an explicit audit, or a field absent from stdout.
+- **Hard rule — token-safe report handling**: on success use the exit status and terminal summary (or `slide.validate`'s `ok` field); never `cat` the complete JSON into context. Read it only for failure investigation, an explicit audit, or a field absent from stdout.
 
 **Mandatory — final carrier-receipt review**: run the review in [`executor-base.md`](../references/executor-base.md) §3 Checkpoints against the retained §IX page jobs, resource roles, and geometry signatures; a repair reruns the final checker once.
 
@@ -346,6 +395,14 @@ python3 ${SKILL_DIR}/scripts/finalize_svg.py <project_path>
 
 #### Step 7.3 — Export the Native PPTX
 
+Final output → `deck.export` ([`semantic_tools.md`](../scripts/docs/semantic_tools.md)) — a stable contract over the same exporter, returning `{ok, pptx_path, status, quality_gate, slide_count, output_bytes, report_path}` instead of stdout lines to parse by hand:
+
+```bash
+python3 ${SKILL_DIR}/scripts/semantic_tools.py deck.export --input '{"project":"<project_path>","no_notes":true}'
+```
+
+(`no_notes` false / omitted when Speaker Notes is enabled; `native_charts_and_tables: true` for the explicit editable Chart/Table decision below.) Or equivalently, the raw exporter:
+
 | Effective decision | Command |
 |---|---|
 | Speaker Notes `enabled` | `python3 ${SKILL_DIR}/scripts/svg_to_pptx.py <project_path>` |
@@ -363,7 +420,7 @@ python3 ${SKILL_DIR}/scripts/finalize_svg.py <project_path>
 
 Sound: the optional post-motion pass is [`animations.md`](../references/animations.md) §2.2. For a narrated MP4, [`generate-audio`](stages/generate-audio.md) owns the delivery choice.
 
-**Success criterion**: the command exits 0 and produces `exports/<project_name>_<timestamp>.pptx`, `validation/<project_name>_<timestamp>.report.json` with `passed` or `passed-with-warnings`, and `validation/<project_name>_<timestamp>.trace.json` when `--conversion-trace` was enabled. The exporter itself requires the current matching `final` quality report and exits nonzero on a missing, unreadable, unsupported, non-final, blocking, stale, or unverifiable one. Read the compact `[POSTFLIGHT]` receipt (`status`, `quality_gate`, slide count, warning counts, paths), disclose material warnings, and never `cat` the full report on success. Retain the report path for a later `deck_motion` handoff; postflight proves the package, not a later MP4 audio track.
+**Success criterion**: the command exits 0 (or `deck.export` returns `ok: true`) and produces `exports/<project_name>_<timestamp>.pptx`, `validation/<project_name>_<timestamp>.report.json` with `passed` or `passed-with-warnings`, and `validation/<project_name>_<timestamp>.trace.json` when `--conversion-trace` was enabled. The exporter itself requires the current matching `final` quality report and exits nonzero on a missing, unreadable, unsupported, non-final, blocking, stale, or unverifiable one. Read the compact `[POSTFLIGHT]` receipt (`status`, `quality_gate`, slide count, warning counts, paths) — or `deck.export`'s equivalent fields plus its `warnings` array — disclose material warnings, and never `cat` the full report on success. Retain the report path for a later `deck_motion` handoff; postflight proves the package, not a later MP4 audio track. `deck.export` reports an `expected_state.slide_count` mismatch as a warning only, never a hard failure. When `<project_path>/build_state.json` exists with `hooks.mode: "enforce"` ([`lifecycle_hooks.md`](../scripts/docs/lifecycle_hooks.md), P4), `deck.export`'s own PreToolUse hook already refuses to run against a stale/failed slide, an unvalidated revision, a non-passed final gate, or a pending job — `DECK_NOT_EXPORTABLE` with the specific reason(s) — before the command above ever reaches the exporter, and a successful export's PostToolUse hook automatically calls `set-export --dirty false --last-export ...` + `set-phase exported`, so the Executor no longer needs to remember to call them by hand. In `"shadow"` mode (the default until a project explicitly opts into `"enforce"`) or on a project with no `build_state.json` at all, none of this changes: the Executor still performs this bookkeeping itself as described above.
 
 ## ✅ Generate PPTX Complete
 
@@ -374,3 +431,5 @@ Sound: the optional post-motion pass is [`animations.md`](../references/animatio
 - [x] `svg_final/` preview built
 - [x] Native PPTX published and postflight report written
 - [ ] **Next**: report the exported PPTX path; when the effective Narration Audio outcome in `design_spec.md §I` is enabled, run [`generate-audio`](stages/generate-audio.md); otherwise run a supporting post-export stage only on its explicit trigger
+
+With `hooks.mode: "enforce"` ([`lifecycle_hooks.md`](../scripts/docs/lifecycle_hooks.md), P4), claiming completion is checked, not just asserted: `python3 ${SKILL_DIR}/scripts/build_state.py stop-check <project_path>` refuses `BUILD_INCOMPLETE` when a slide is still stale/dirty/building/failed, the final gate hasn't passed, or export is dirty — naming exactly what's left — and stops blocking (surfacing `QUALITY_GATE_UNRESOLVED` instead) after repeated unresolved attempts rather than looping forever. In `"shadow"` mode or on a project with no `build_state.json`, this checklist itself remains the completion authority.

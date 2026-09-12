@@ -1,0 +1,24 @@
+{
+  "schema": "ppt-master.benchmark-run.v1",
+  "case_id": "text-teaching",
+  "run_at": "2026-09-11T15:36:20+00:00",
+  "route": "quick",
+  "project_path": "C:\\Users\\admin\\Music\\ppt-master-main\\ppt-master-main\\projects\\text-teaching-benchmark_20260911",
+  "metrics": {
+    "wall_clock_seconds": 685.09,
+    "total_build_seconds": 685.09,
+    "tool_call_count": 10,
+    "rework_count": 2,
+    "time_to_first_slide_seconds": 378.178074,
+    "time_to_usable_preview_seconds": null,
+    "checker_error_count": 0,
+    "checker_warning_count": 2,
+    "pptx_postflight_result": "passed-with-warnings",
+    "input_tokens": null,
+    "output_tokens": null,
+    "manual_correction_count": 0,
+    "visual_score": 4.0,
+    "resume_success": "N/A"
+  },
+  "notes": "input_tokens/output_tokens intentionally left unset: this session's cumulative token usage also includes the preceding P0/P1 architecture research and design work, not just this isolated Quick-generate run, so it would not be a valid per-case token baseline. A future re-run dedicated solely to this case in a fresh session should fill those two fields. time_to_usable_preview_seconds is genuinely null: Quick's own workflow (quick-generate.md) does not mandate Live Preview auto-startup (that mandate is Default-only, generate-pptx.md Step 6), and the live_preview daemon was not started for this run (its Flask dependency was not installed). visual_score is a self-assessed structural read (checker-clean layout, consistent grid/typography, content matches corpus.md outline exactly); no browser-rendered screenshot review was performed."
+}

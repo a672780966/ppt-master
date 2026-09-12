@@ -25,6 +25,8 @@ Formula handling is not a user-confirmed policy, image resource, manifest, or `s
 
 ## 2. Canonical Markers
 
+**Preferred — `formula.create`**: `python3 ${SKILL_DIR}/scripts/semantic_tools.py formula.create --input-file <payload.json>` (always a file or stdin for LaTeX — never `--input` on a command line, shell layers can mangle its backslashes) takes `latex` + `display` (+ `id`/`frame`/`font_size`/`color`/`align` for `display: "block"`) and returns the exact marker below already assembled — `svg_fragment` for `block` is the complete `<g data-pptx-replace-with="formula">` group ready to insert verbatim; for `inline` it is the bare `<tspan data-pptx-inline-formula="...">` to place inside your own `<text>`. It also validates the LaTeX is inside the compiler's supported profile up front (`UNSUPPORTED_LATEX` instead of a compile failure discovered only at export) and computes the required Unicode preview text for you. The two subsections below are the marker contract the tool implements — read them to understand what export does with the result and to hand-author a marker in the rare case the tool's LaTeX support gate is stricter than the raw exporter turns out to need ([`semantic_tools.md`](../scripts/docs/semantic_tools.md)).
+
 ### 2.1 Inline formula
 
 ```xml

@@ -7,6 +7,13 @@
 # Install / 安装方式：
 #   pip install -r requirements.txt
 
+# Context Compiler exact token counts / Context Compiler 精确 token 计数
+# (scripts/project_management/page_context.py page-context --compile / --record-usage)
+# Optional: without it, compile stats still write with estimated_tokens: null,
+# token_status: "unavailable".
+# 可选：不装时 compile stats 仍会写入，只是 estimated_tokens 为 null。
+tiktoken>=0.7.0
+
 # Template registration / 模板注册 (scripts/register_template.py)
 PyYAML>=6.0
 

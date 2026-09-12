@@ -38,6 +38,7 @@ from urllib.parse import urlparse
 
 from .page_context import (
     build_page_context,
+    compile_page_context,
     page_context_usage_report,
     record_page_context_usage,
     render_page_context,
@@ -1221,6 +1222,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write compact-output token telemetry under analysis/page-context/",
     )
+    page_context.add_argument(
+        "--compile",
+        action="store_true",
+        help=(
+            "Production Context Compiler call (P2): also write measurable "
+            "compile stats under analysis/context-compiler/, and on a "
+            "PageContextError print a COMPILER_FALLBACK signal instead of "
+            "raising, so the caller can fall back to a full design_spec.md + "
+            "spec_lock.md read for this page"
+        ),
+    )
 
     page_context_report = subparsers.add_parser(
         "page-context-report",
@@ -1376,6 +1388,21 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "page-context":
+            if args.compile:
+                stats, output = compile_page_context(args.project_path, args.page)
+                if stats["fallback_occurred"]:
+                    print(
+                        "[COMPILER_FALLBACK] "
+                        f"page-context could not compile {stats['page']}: "
+                        f"{stats['fallback_reason']}; read the complete "
+                        "design_spec.md and spec_lock.md for this page instead",
+                        file=sys.stderr,
+                    )
+                    print(json.dumps(stats, ensure_ascii=False, indent=2))
+                    return 5
+                print(output, end="")
+                return 0
+
             result = build_page_context(args.project_path, args.page)
             output, measured_reads = render_page_context(
                 result,

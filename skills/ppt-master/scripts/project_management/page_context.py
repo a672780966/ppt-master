@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 """
-PPT Master - Page Context Projection
+PPT Master - Page Context Compiler (P2 Persistent Build Runtime)
 
 Build deterministic per-page execution views and optional token telemetry.
+``build_page_context`` / ``render_page_context`` are the production per-page
+Context Compiler for Default Generate PPTX Step 6 (workflows/generate-pptx.md):
+called once per page in place of a full design_spec.md + spec_lock.md re-read,
+with ``compile_page_context`` additionally recording measurable compile
+stats and a reversible fallback signal for the caller. design_spec.md and
+spec_lock.md remain the sole source of design truth — this module only
+projects a bounded, disposable view of them; it is never a second copy of
+their content and never persisted as a design artifact (see
+references/artifact-ownership.md's page-context row).
 
 Usage:
     Imported by project_management.cli.
 
 Examples:
     build_page_context(Path("projects/demo"), "P07")
+    compile_page_context(Path("projects/demo"), "P07")
 
 Dependencies:
     None for projection; tiktoken is optional for exact usage counts.
@@ -21,6 +31,7 @@ import json
 import math
 import re
 import statistics
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +61,7 @@ from visualization_catalog import (
 PAGE_CONTEXT_SCHEMA = "ppt-master.page-context.v2"
 PAGE_CONTEXT_USAGE_SCHEMA = "ppt-master.page-context-usage.v2"
 PAGE_CONTEXT_REPORT_SCHEMA = "ppt-master.page-context-usage-report.v2"
+CONTEXT_COMPILER_STATS_SCHEMA = "ppt-master.context-compiler-stats.v1"
 TOKEN_ENCODING = "o200k_base"
 PAGE_CONTEXT_TOKEN_TARGET = 2000
 LOCK_PROJECTION_TOKEN_TARGET = 1000
@@ -982,3 +994,120 @@ def page_context_usage_report(project: str | Path) -> dict[str, object]:
             "controlled_output": _metric(controlled),
         },
     }
+
+
+_CAPABILITY_FIELDS = {
+    "visualization": "visualization",
+    "chart": "legacy-chart",
+    "structure_intent": "legacy-structure-intent",
+    "images": "images",
+    "template": "structured-template",
+}
+
+
+def _loaded_capabilities(current_page: dict[str, object]) -> list[str]:
+    """Name which optional capability fields this page's projection carried."""
+    return [
+        label
+        for field, label in _CAPABILITY_FIELDS.items()
+        if current_page.get(field)
+    ]
+
+
+def _context_compiler_stats_path(project_path: Path, page: str) -> Path:
+    stats_dir = project_path / "analysis" / "context-compiler"
+    stats_dir.mkdir(parents=True, exist_ok=True)
+    return stats_dir / f"{page}.compile.json"
+
+
+def _write_context_compiler_stats(project_path: Path, page: str, stats: dict[str, object]) -> Path:
+    """Atomically persist one page's compile-stats record."""
+    path = _context_compiler_stats_path(project_path, page)
+    payload = json.dumps(stats, ensure_ascii=False, indent=2) + "\n"
+    temporary_path = path.with_suffix(".compile.json.tmp")
+    temporary_path.write_text(payload, encoding="utf-8")
+    temporary_path.replace(path)
+    return path
+
+
+def compile_page_context(
+    project: str | Path,
+    raw_page: str,
+) -> tuple[dict[str, object], str | None]:
+    """Compile one page's production context, recording measurable stats.
+
+    This is the reversible production entry point Default Generate PPTX Step 6
+    calls once per page in place of a full design_spec.md + spec_lock.md
+    re-read. On success, returns ``(stats, compact_json_output)`` and writes
+    ``stats`` to ``analysis/context-compiler/<page>.compile.json``. On a
+    ``PageContextError`` (missing/ambiguous data, failed structural preflight,
+    an unresolved visualization key, ...), returns ``(stats, None)`` with
+    ``stats["fallback_occurred"] is True`` — the caller falls back to reading
+    the complete design_spec.md and spec_lock.md for this page exactly as
+    documented before this compiler existed; design_spec.md/spec_lock.md stay
+    the only source of design truth in either branch.
+    """
+    project_path = Path(project).resolve()
+    started = time.perf_counter()
+
+    try:
+        page, _page_number = normalize_page_key(raw_page)
+    except PageContextError as exc:
+        stats = {
+            "schema": CONTEXT_COMPILER_STATS_SCHEMA,
+            "page": raw_page,
+            "compiled_chars": None,
+            "estimated_tokens": None,
+            "token_status": "unavailable",
+            "loaded_sources": [],
+            "loaded_capabilities": [],
+            "compile_latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            "fallback_occurred": True,
+            "fallback_reason": str(exc),
+        }
+        return stats, None
+
+    try:
+        result = build_page_context(project_path, page)
+        output, _measured_reads = render_page_context(result)
+    except PageContextError as exc:
+        stats = {
+            "schema": CONTEXT_COMPILER_STATS_SCHEMA,
+            "page": page,
+            "compiled_chars": None,
+            "estimated_tokens": None,
+            "token_status": "unavailable",
+            "loaded_sources": [],
+            "loaded_capabilities": [],
+            "compile_latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            "fallback_occurred": True,
+            "fallback_reason": str(exc),
+        }
+        _write_context_compiler_stats(project_path, page, stats)
+        return stats, None
+
+    # Stop the compile clock here: everything below (loading the tiktoken
+    # encoding, counting tokens) is measurement instrumentation, not
+    # context-compilation work, and must not inflate compile_latency_ms.
+    compile_latency_ms = round((time.perf_counter() - started) * 1000, 3)
+
+    count_tokens, token_status = _token_counter()
+    loaded_sources = [
+        f"{scope}:{relative_path}"
+        for path in result.inputs
+        for scope, relative_path in (_input_location(project_path, path),)
+    ]
+    stats = {
+        "schema": CONTEXT_COMPILER_STATS_SCHEMA,
+        "page": page,
+        "compiled_chars": len(output),
+        "estimated_tokens": count_tokens(output) if count_tokens else None,
+        "token_status": token_status,
+        "loaded_sources": loaded_sources,
+        "loaded_capabilities": _loaded_capabilities(result.context.get("page_context", {})),
+        "compile_latency_ms": compile_latency_ms,
+        "fallback_occurred": False,
+        "fallback_reason": None,
+    }
+    _write_context_compiler_stats(project_path, page, stats)
+    return stats, output

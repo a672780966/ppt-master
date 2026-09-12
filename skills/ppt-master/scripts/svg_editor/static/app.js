@@ -713,6 +713,11 @@
         rememberSlideInLocation(name);
         selectedElementIds.clear();
         slideAnnotations = {};
+        if (window.Workbench) window.Workbench.onSlideSelected(name);
+        fetch("/api/runtime/active-slide", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ slide_id: name }),
+        }).catch(function () {});
         updateNavLabel();
 
         // Reset right panel and rubber band
@@ -924,6 +929,7 @@
             annotationText.value = "";
             propsEl.style.display = "none";
             propsEl.innerHTML = "";
+            if (window.Workbench) window.Workbench.onSelectionChanged([]);
             return;
         }
 
@@ -955,6 +961,8 @@
         annotationText.value = count === 1
             ? (slideAnnotations[selectedElementIds.values().next().value] || "")
             : "";
+
+        if (window.Workbench) window.Workbench.onSelectionChanged(Array.from(selectedElementIds));
     }
 
     // ---- Rubber band selection ----
@@ -1732,6 +1740,16 @@
             });
             header.appendChild(removeBtn);
 
+            if (window.Workbench) {
+                var aiBtn = document.createElement("button");
+                aiBtn.className = "ann-apply-ai";
+                aiBtn.textContent = "Apply with AI";
+                aiBtn.addEventListener("click", function () {
+                    window.Workbench.applyAnnotationWithAI(eid, slideAnnotations[eid]);
+                });
+                header.appendChild(aiBtn);
+            }
+
             item.appendChild(header);
 
             var textDiv = document.createElement("div");
@@ -1822,6 +1840,7 @@
                             var item = slideListEl.querySelector('.slide-item[data-name="' + cssAttr(activeSlide) + '"]');
                             selectSlide(activeSlide, item || undefined);
                         }
+                        if (window.Workbench) window.Workbench.refresh();
                     });
                 }
             })
@@ -1972,6 +1991,7 @@
         if (!liveMode || slidePollTimer) return;
         slidePollTimer = window.setInterval(function () {
             loadSlides();
+            if (window.Workbench) window.Workbench.refresh();
         }, 2000);
     }
 
@@ -3142,6 +3162,7 @@
     loadConfig().then(function () {
         loadSlides();
         startSlidePolling();
+        if (window.Workbench) window.Workbench.init();
     });
     initRubberBand();
     initKeyboardShortcuts();

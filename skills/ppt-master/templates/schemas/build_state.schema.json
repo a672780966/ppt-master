@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ppt-master://schemas/build-state/v1",
+  "title": "PPT Master build_state.json",
+  "description": "Runtime execution/orchestration state for one project: phase, per-slide revision/status/dirty tracking, job queue, validation-gate mirror, export-dirty flag, and (P4) the hooks mode plus per-slide validation-revision binding that Lifecycle Hooks read to enforce export/completion readiness deterministically. Never a source of design intent (design_spec.md/spec_lock.md), content (svg_output/), quality provenance (validation/svg_quality_report.json), or audit history (validation/workflow.log). Enforced by hand-written checks in scripts/runtime/build_state.py, following this repository's convention of treating JSON Schema files as a documented contract rather than a runtime validation-engine dependency.",
+  "type": "object",
+  "required": ["schema", "project", "plan", "slides", "jobs", "validation", "export"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "ppt-master.build-state.v1"},
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"enum": ["shadow", "enforce"]},
+        "stop_block_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "project": {
+      "type": "object",
+      "required": ["phase", "route"],
+      "additionalProperties": false,
+      "properties": {
+        "phase": {"enum": ["planned", "building", "ready", "exporting", "exported"]},
+        "route": {"enum": ["default", "quick", "beautify", "image-to-pptx", "edit-native"]},
+        "updated_at": {"type": ["string", "null"]}
+      }
+    },
+    "plan": {
+      "type": "object",
+      "required": ["revision", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "revision": {"type": "integer", "minimum": 0},
+        "status": {"enum": ["active", "superseded"]},
+        "updated_at": {"type": ["string", "null"]}
+      }
+    },
+    "slides": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^P[0-9]{2,}$": {
+          "type": "object",
+          "required": ["revision", "plan_revision", "status", "dirty"],
+          "additionalProperties": false,
+          "properties": {
+            "revision": {"type": "integer", "minimum": 0},
+            "plan_revision": {"type": "integer", "minimum": 0},
+            "status": {
+              "enum": ["planned", "building", "ready", "dirty", "validating", "failed", "stale"]
+            },
+            "dirty": {"type": "boolean"},
+            "content_hash": {
+              "type": ["string", "null"],
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "svg_path": {"type": ["string", "null"]},
+            "validated_revision": {"type": ["integer", "null"], "minimum": 0},
+            "validation_status": {
+              "enum": ["passed", "passed-with-warnings", "failed", null]
+            },
+            "ai_edit_active_job": {"type": ["string", "null"]},
+            "ai_edit_last_job": {"type": ["string", "null"]},
+            "updated_at": {"type": ["string", "null"]}
+          }
+        }
+      }
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "slide", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^job-[0-9]{3,}$"},
+          "type": {"enum": ["ai-edit", "direct-edit", "regen", "export"]},
+          "slide": {
+            "type": ["string", "null"],
+            "pattern": "^P[0-9]{2,}$"
+          },
+          "expected_revision": {"type": ["integer", "null"], "minimum": 0},
+          "status": {"enum": ["queued", "in_progress", "done", "rejected", "cancelled"]},
+          "created_at": {"type": ["string", "null"]},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": ["early_gate", "final_gate"],
+      "additionalProperties": false,
+      "properties": {
+        "early_gate": {"enum": ["pending", "passed", "failed", "skipped"]},
+        "final_gate": {"enum": ["pending", "passed", "failed"]},
+        "final_gate_report_sha256": {"type": ["string", "null"]}
+      }
+    },
+    "export": {
+      "type": "object",
+      "required": ["dirty", "last_export"],
+      "additionalProperties": false,
+      "properties": {
+        "dirty": {"type": "boolean"},
+        "last_export": {"type": ["string", "null"]},
+        "plan_revision": {"type": ["integer", "null"], "minimum": 0},
+        "deck_revision": {"type": ["integer", "null"], "minimum": 0}
+      }
+    }
+  }
+}

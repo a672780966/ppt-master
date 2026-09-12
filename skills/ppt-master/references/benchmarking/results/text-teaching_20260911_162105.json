@@ -1,0 +1,24 @@
+{
+  "schema": "ppt-master.benchmark-run.v1",
+  "case_id": "text-teaching",
+  "run_at": "2026-09-11T16:21:05+00:00",
+  "route": "default",
+  "project_path": "C:\\Users\\admin\\Music\\ppt-master-main\\ppt-master-main\\projects\\text-teaching-p2-default_ppt169_20260912",
+  "metrics": {
+    "wall_clock_seconds": 712.262,
+    "total_build_seconds": 712.262,
+    "tool_call_count": 36,
+    "rework_count": 0,
+    "time_to_first_slide_seconds": 603.285881,
+    "time_to_usable_preview_seconds": null,
+    "checker_error_count": 0,
+    "checker_warning_count": 2,
+    "pptx_postflight_result": "passed-with-warnings",
+    "input_tokens": null,
+    "output_tokens": null,
+    "manual_correction_count": 0,
+    "visual_score": 4.0,
+    "resume_success": "yes"
+  },
+  "notes": "P2 Context Compiler regression, NOT directly comparable to the P0 text-teaching (Quick) baseline's wall_clock/tool_call_count -- different route/pipeline entirely (Default with Strategist+design_spec.md+spec_lock.md+two quality gates vs Quick's single lockless pass). This run's purpose: verify the compiler enters real per-page production (9/9 pages compiled, 0 fallback_occurred, see analysis/context-compiler/_summary.json for per-page compiled_chars/estimated_tokens/loaded_capabilities/compile_latency_ms), the full Default chain still succeeds end-to-end (real design_spec.md/spec_lock.md from a frozen confirmation record at scripts/tests/fixtures/benchmark/text-teaching/default_confirmation.json, real early+final quality gates, real PPTX export), final quality does not regress (same 0 blocking errors / 2 pre-existing cosmetic warnings as the P0 baseline), and build_state.py/resume stays correct through a real Default pipeline (planned -> ready x9 -> early/final gate passed -> exported -> nothing_pending). resume_success=yes reflects that P1's resume-from-disk tracked this run correctly at every stage, not a cross-route timing claim. A strict Default legacy-context vs Default compiled-context A/B (same fixture, same frozen decisions) is noted as a valid future follow-up, not performed here."
+}

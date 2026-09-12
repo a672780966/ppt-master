@@ -20,9 +20,28 @@ The user opens a new chat naming a project path with continuation intent — "�
 
 ---
 
+## Step 1a: Build-state resume check (additive, optional)
+
+Backward-compatible: this step runs only when `<project_path>/build_state.json` exists ([`artifact-ownership.md`](../../references/artifact-ownership.md) build_state.json row). A project that never adopted P1 Persistent Build State, or any legacy project, has no such file — skip straight to Step 2 exactly as this stage has always documented.
+
+```bash
+python3 ${SKILL_DIR}/scripts/build_state.py resume <project_path> --json
+```
+
+| `next_action` | Where Step 2 resumes |
+|---|---|
+| `"legacy"` (file absent) | Ignore this step; resume exactly as documented in Step 2 below |
+| `author_slide` | Step 6, starting at the named slide instead of re-deriving position from context |
+| `run_final_gate` | Step 6's Quality Check Gate, skipping straight past authoring |
+| `export` | Step 7 |
+| `process_job` | Reconcile the named queued job (e.g. a Live Preview annotation submitted through `build_state.py job enqueue`) before continuing |
+| `nothing_pending` | Report the project is already fully built and exported; ask before regenerating anything |
+
+---
+
 ## Step 2: Load the Generate authority, proceed from Step 6
 
-Read `skills/ppt-master/workflows/generate-pptx.md` and jump to `### Step 6: Executor Phase`, which loads `executor-base.md` and applies its context policy: read the complete Design Spec, then the complete lock, once; resolve the effective Speaker Notes / Custom Animations / Narration Audio outcomes from `design_spec.md §I` (missing outcomes default `enabled` / `disabled` / `disabled`; never from the lock).
+Read `skills/ppt-master/workflows/generate-pptx.md` and jump to `### Step 6: Executor Phase`, at the slide `build_state.py resume` named in Step 1a when `build_state.json` exists; otherwise resume exactly as this stage has always documented. That step loads `executor-base.md` and applies its context policy: read the complete Design Spec, then the complete lock, once; resolve the effective Speaker Notes / Custom Animations / Narration Audio outcomes from `design_spec.md §I` (missing outcomes default `enabled` / `disabled` / `disabled`; never from the lock).
 
 Before the first SVG, verify every conditional dependency discoverable from that pair:
 
@@ -40,7 +59,7 @@ python3 skills/ppt-master/scripts/visualization_recall.py validate <family/key> 
 python3 skills/ppt-master/scripts/visualization_recall.py validate --legacy-bare <legacy-key> [...]
 ```
 
-Then continue the documented Step 6–7 pipeline exactly as `generate-pptx.md` lists it: read the frozen `notes/total.md` once when §X declares a final/literal script; when mid-deck, read the latest completed SVG and current image metadata after their paths are verified; read the Step 6 construction core and one locked preset file or only the exact `*_references` of a custom, never reopening the mode or visual-style catalogs; load only the branches the condition table selects; make the per-page topology decision from retained §IX before any geometry; when structured, read the template Design Spec and each selected prototype once. Use `page-context` only for explicit diagnostics or an unresolved path-SHA question ([`artifact-ownership.md`](../../references/artifact-ownership.md) §1), never as a routine pre-page load. Then the quality gate, conditional notes, conditional custom animation, Step 7 (`total_md_split` → `finalize_svg` → `svg_to_pptx`; disabled notes use `--no-notes`), and `generate-audio` when Narration Audio is enabled.
+Then continue the documented Step 6–7 pipeline exactly as `generate-pptx.md` lists it: read the frozen `notes/total.md` once when §X declares a final/literal script; when mid-deck, read the latest completed SVG and current image metadata after their paths are verified; read the Step 6 construction core and one locked preset file or only the exact `*_references` of a custom, never reopening the mode or visual-style catalogs; load only the branches the condition table selects; make the per-page topology decision from retained §IX before any geometry; when structured, read the template Design Spec and each selected prototype once. Call `page-context <project_path> P<NN> --compile` before each page's first coordinate (`generate-pptx.md`'s Context validity table) rather than re-reading the complete lock; a `[COMPILER_FALLBACK]` response reads the complete `design_spec.md` + `spec_lock.md` for that one page instead. Then the quality gate, conditional notes, conditional custom animation, Step 7 (`total_md_split` → `finalize_svg` → `svg_to_pptx`; disabled notes use `--no-notes`), and `generate-audio` when Narration Audio is enabled.
 
 A newer explicit instruction after final Stage 2 updates only its effective outcome and provenance in `design_spec.md §I`, then resumes at the owning step — no Confirm UI, no lock entry; apply Generate's notes/audio dependency gate before writing and its sidecar suppression rules at export.
 

@@ -1,0 +1,76 @@
+{
+  "schema": "ppt-master.frozen-confirmation.v1",
+  "note": "Frozen Stage-1 + Stage-2 confirmation decisions for the P0/P2 text-teaching benchmark fixture, Default Generate PPTX route. Confirm UI's human click is skipped (explicit delegation, confirm-surface.md), but the design decisions it would have produced are NOT skipped: this record IS those decisions, version-controlled so every future regression against this fixture (P2 compiled-context, and any later phase) replays byte-identical input instead of ad-hoc improvisation. Never edited in place — a materially different decision set is a new frozen record.",
+  "case_id": "text-teaching",
+  "fixture": "scripts/tests/fixtures/benchmark/text-teaching/lesson.md",
+  "stage1": {
+    "communication_contract": {
+      "primary_language": "zh",
+      "target_audience": "大一零基础学生",
+      "communication_intent": "在 45 分钟内教会学生列表（list）与字典（dict）的基本概念与常用操作，并能根据场景做出选择",
+      "desired_audience_outcome": "学生能独立写出使用列表和字典的小程序，并能解释为什么在给定场景下选择其中一种",
+      "core_message": "列表按位置存储有序数据，字典按键存储关联数据——按你需要的访问方式选择",
+      "delivery_context": "课堂讲授，45 分钟连续课程",
+      "artifact_afterlife": "课后作为学生复习资料留存",
+      "reading_mode": "balanced",
+      "content_strategy": "严格遵循 lesson.md 大纲的 8 个内容板块顺序，不增删信息",
+      "consumption_mode": "balanced"
+    },
+    "template_mode": "free_design",
+    "design_spec_depth": "brief",
+    "generation_mode": "continuous"
+  },
+  "stage2": {
+    "mode": "instructional",
+    "visual_style": "swiss-minimal",
+    "canvas": {"format": "ppt169", "viewBox": "0 0 1280 720"},
+    "theme": "极简教学网格，单一强调色，克制装饰",
+    "tone": "清晰、直接、专业",
+    "colors": {
+      "bg": "#FFFFFF",
+      "secondary_bg": "#F5F5F7",
+      "primary": "#1E5FFF",
+      "accent": "#1E5FFF",
+      "text": "#1D1D1F",
+      "secondary_text": "#6E6E73",
+      "divider": "#D8D8DC",
+      "code_bg": "#0D1117",
+      "code_text": "#E6EDF3",
+      "code_muted": "#8B949E",
+      "code_result": "#7EE787",
+      "task_tint": "#EAF1FF"
+    },
+    "typography": {
+      "font_family": "Microsoft YaHei",
+      "title_family": "Microsoft YaHei",
+      "body_family": "Microsoft YaHei",
+      "code_family": "Consolas",
+      "sizes": {"title": 40, "subtitle": 26, "body": 22, "annotation": 16, "code": 20}
+    },
+    "icons": {"library": "none", "inventory": "none"},
+    "layout_anchors": {
+      "page_margin": 64,
+      "block_gap": 20,
+      "column_gutter": 40,
+      "corner_radius": 8,
+      "body_leading": 30
+    },
+    "pptx_structure": "flat",
+    "production": {
+      "speaker_notes": "disabled — workflow default",
+      "custom_animations": "disabled — workflow default",
+      "narration_audio": "disabled — workflow default"
+    },
+    "page_roster": [
+      {"id": "P01", "role": "cover", "rhythm": "anchor", "title": "列表与字典入门", "relationships": "none"},
+      {"id": "P02", "role": "content", "rhythm": "dense", "title": "课程目标", "relationships": "order"},
+      {"id": "P03", "role": "content", "rhythm": "dense", "title": "列表（list）基本概念与操作", "relationships": "link"},
+      {"id": "P04", "role": "content", "rhythm": "dense", "title": "字典（dict）基本概念与操作", "relationships": "link"},
+      {"id": "P05", "role": "content", "rhythm": "dense", "title": "列表与字典对比", "relationships": "contrast"},
+      {"id": "P06", "role": "content", "rhythm": "dense", "title": "代码示例 1 — 处理学生成绩列表", "relationships": "link"},
+      {"id": "P07", "role": "content", "rhythm": "dense", "title": "代码示例 2 — 用字典记录学生信息", "relationships": "link"},
+      {"id": "P08", "role": "content", "rhythm": "dense", "title": "课堂练习", "relationships": "membership"},
+      {"id": "P09", "role": "ending", "rhythm": "breathing", "title": "总结", "relationships": "contrast"}
+    ]
+  }
+}

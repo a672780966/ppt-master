@@ -19,6 +19,8 @@ A `<pattern>` requests one fixed DrawingML preset; the converter never renders t
 
 ## 2. PowerPoint-Native Chart / Table Replacement Markers (Opt-in)
 
+**Preferred — `chart.create` / `table.create`**: `python3 ${SKILL_DIR}/scripts/semantic_tools.py chart.create --input '<json>'` (types: `column`/`bar`/`line`/`pie`/`donut`) and `... table.create --input '<json>'` take plain data — categories/series or columns/rows plus a frame and style — and return a complete, already-`data-pptx-fallback-sha256`-stamped `<g data-pptx-replace-with="...">` fragment matching the marker contract below, ready to insert verbatim. There is no separate `--write` stamping step for a tool-produced fragment (see "Fingerprint timing" in [`semantic_tools.md`](../scripts/docs/semantic_tools.md)) — `stamp_native_fallbacks.py --write` below remains for a marker that was hand-authored or edited after insertion. The schemas and hard rules below are the contract the tools implement; read them to understand what the exporter and checker expect, and to hand-author a marker for a shape the two tools don't cover.
+
 The complete visible SVG fallback stays required for preview and default export; Chart/Table authority is object-local:
 
 - **SVG-first (default)** — free-design, Brand-only, and Style-only authoring omits `data-pptx-native-authority`; the visible subtree is the design authority and JSON its derived projection. Canonical authoring records `data-pptx-fallback-sha256` only after fallback and JSON are synchronized; a later visible edit regenerates the JSON and re-stamps. A missing or stale baseline keeps fallback export available but makes `--native-charts-and-tables` fail closed.

@@ -17,7 +17,7 @@ python3 scripts/project_manager.py scaffold-spec <project_path>  # optional manu
 python3 scripts/project_manager.py scaffold-lock <project_path>  # optional manual helper
 python3 scripts/project_manager.py validate <project_path>
 python3 scripts/project_manager.py info <project_path>
-python3 scripts/project_manager.py page-context <project_path> P07 [--pretty] [--record-usage]
+python3 scripts/project_manager.py page-context <project_path> P07 [--pretty] [--record-usage] [--compile]
 python3 scripts/project_manager.py page-context-report <project_path>
 ```
 
@@ -94,16 +94,19 @@ Notes:
   Multi-deck per project: several PPTX imports each get their own `<stem>.*`
   artifacts and a `decks[]` entry; re-importing the same stem replaces its entry.
 
-### On-demand page execution view
+### On-demand page execution view (Context Compiler, P2)
 
 `page-context` projects `design_spec.md` and `spec_lock.md` into one compact
 current-page view on stdout. The default command is read-only; `--pretty`
 changes JSON formatting only. Before projection it revalidates the machine lock
 and selected template-root identities; design-brief values are not treated as
-a second lock. Slide headings at H3–H6 remain readable by the projector. Normal
-generation retains the complete planning artifacts once per valid execution
-context and does not invoke this command before every page; use it only for an
-explicit diagnostic, routing check, or context-usage measurement.
+a second lock. Slide headings at H3–H6 remain readable by the projector.
+Default Generate PPTX Step 6 and `workflows/stages/resume-execute.md` retain
+the complete planning artifacts once per valid execution context, then call
+`--compile` before every page's first coordinate instead of re-consulting
+memory of the full lock text — this is the production per-page load path, not
+a diagnostic. `--record-usage` (without `--compile`) remains the separate
+ad-hoc telemetry/routing-diagnostic mode described below.
 
 Each invocation deliberately includes the bounded `global` anchor set as a
 cross-page continuity view, not a color/font allowlist. `lock_source` binds that projection to the current
@@ -146,6 +149,22 @@ token-unavailable pages plus unique referenced files. Telemetry may be partial;
 it does not measure once-loaded references, source reads, or other session
 context.
 
+`--compile` is the production entry point: it prints the same compact stdout
+payload as the default command, then also writes measurable compile stats to
+`analysis/context-compiler/P<NN>.compile.json`
+(`ppt-master.context-compiler-stats.v1`) — `compiled_chars`, `estimated_tokens`
+(via `tiktoken`/`o200k_base` when installed, else `null`), `token_status`,
+`loaded_sources` (the exact files this page's projection actually depended
+on), `loaded_capabilities` (which of `visualization` / `legacy-chart` /
+`legacy-structure-intent` / `images` / `structured-template` this page's
+projection carried), `compile_latency_ms` (the projection work only — token
+counting and any one-time tokenizer-library load happen after the clock
+stops), and `fallback_occurred` / `fallback_reason`. On a `PageContextError`
+it prints `[COMPILER_FALLBACK]` to stderr, still writes a stats record with
+`fallback_occurred: true` (when a page id was resolvable at all), and exits
+`5` instead of raising — the caller's reversible signal to read the complete
+`design_spec.md` + `spec_lock.md` for that one page.
+
 Common formats:
 - `ppt169`
 - `ppt43`
@@ -165,6 +184,7 @@ python3 scripts/project_manager.py init my_widescreen --format ppt169
 python3 scripts/project_manager.py scaffold-spec projects/my_widescreen_ppt169_20251116  # optional
 python3 scripts/project_manager.py scaffold-lock projects/my_widescreen_ppt169_20251116  # optional
 python3 scripts/project_manager.py page-context projects/my_widescreen_ppt169_20251116 P07 --record-usage
+python3 scripts/project_manager.py page-context projects/my_widescreen_ppt169_20251116 P07 --compile
 python3 scripts/project_manager.py page-context-report projects/my_widescreen_ppt169_20251116
 ```
 

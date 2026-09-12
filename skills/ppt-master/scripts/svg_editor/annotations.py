@@ -18,6 +18,8 @@ import re
 from copy import deepcopy
 from typing import Optional
 
+from runtime.svg_tree import find_by_id as _find_by_id, find_with_parent as _find_with_parent
+
 SVG_NS = 'http://www.w3.org/2000/svg'
 XLINK_NS = 'http://www.w3.org/1999/xlink'
 
@@ -44,25 +46,6 @@ def assign_temp_ids(root: ET.Element) -> None:
         if elem.get('id') is None:
             elem.set('id', f'_edit_{counter}')
             counter += 1
-
-
-def _find_by_id(root: ET.Element, element_id: str) -> Optional[ET.Element]:
-    """Find an element by its id attribute in the SVG tree."""
-    for elem in root.iter():
-        if elem.get('id') == element_id:
-            return elem
-    return None
-
-
-def _find_with_parent(
-    root: ET.Element, element_id: str,
-) -> tuple[Optional[ET.Element], Optional[ET.Element]]:
-    """Find an element and its parent by id."""
-    for parent in root.iter():
-        for child in list(parent):
-            if child.get('id') == element_id:
-                return child, parent
-    return None, None
 
 
 def _local_name(elem: ET.Element) -> str:

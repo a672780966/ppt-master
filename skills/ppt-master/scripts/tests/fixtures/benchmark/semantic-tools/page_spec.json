@@ -1,0 +1,42 @@
+{
+  "schema": "ppt-master.semantic-tools-fixture.v1",
+  "note": "P3 Semantic Tool Layer acceptance fixture. One page combining exactly 1 native shape + 1 formula + 1 chart + 1 table, each produced through scripts/semantic_tools.py rather than hand-authored. Verifies: agent -> semantic API -> existing renderer/compiler -> SVG -> native PPTX, and that the final PowerPoint objects are real Shape/Formula/Chart/Table objects, not images. Frozen and version-controlled like the text-teaching fixture; a materially different case is a new fixture id, not an edit here.",
+  "page_title": "本周学习数据小结",
+  "shape": {
+    "id": "p-tools-arrow",
+    "preset": "rightArrow",
+    "frame": {"x": 64, "y": 230, "width": 110, "height": 60},
+    "fill": "#1E5FFF",
+    "stroke": "none"
+  },
+  "formula": {
+    "id": "p-tools-average",
+    "latex": "\\bar{x} = \\frac{\\sum_{i=1}^{n} x_i}{n}",
+    "display": "block",
+    "frame": {"x": 210, "y": 225, "width": 380, "height": 70},
+    "font_size": 28,
+    "color": "#1D1D1F",
+    "align": "left"
+  },
+  "chart": {
+    "id": "p-tools-hours-chart",
+    "type": "column",
+    "frame": {"x": 64, "y": 320, "width": 526, "height": 260},
+    "title": "本周每天学习时长（小时）",
+    "categories": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
+    "series": [{"name": "学习时长", "values": [2, 1.5, 3, 2, 2.5, 4, 1]}],
+    "style": {"colors": ["#1E5FFF"], "axis_color": "#6E6E73"},
+    "show_legend": false
+  },
+  "table": {
+    "id": "p-tools-goals-table",
+    "frame": {"x": 620, "y": 190, "width": 596, "height": 200},
+    "columns": ["学习目标", "完成情况"],
+    "rows": [
+      ["完成列表练习", "True"],
+      ["完成字典练习", "True"],
+      ["复习课堂代码示例", "False"]
+    ],
+    "style": {"header_fill": "#1E5FFF", "header_text": "#FFFFFF", "band_fill": "#F5F5F7", "body_text": "#1D1D1F", "border_color": "#D8D8DC", "font_size": 18, "header_font_size": 18}
+  }
+}

@@ -16,6 +16,7 @@ Dependencies:
 """
 
 from project_management.page_context import (
+    CONTEXT_COMPILER_STATS_SCHEMA,
     LOCK_PROJECTION_TOKEN_TARGET,
     PAGE_CONTEXT_REPORT_SCHEMA,
     PAGE_CONTEXT_SCHEMA,
@@ -26,6 +27,7 @@ from project_management.page_context import (
     PageContextResult,
     PageRead,
     build_page_context,
+    compile_page_context,
     normalize_page_key,
     page_context_usage_report,
     record_page_context_usage,
@@ -33,6 +35,7 @@ from project_management.page_context import (
 )
 
 __all__ = [
+    "CONTEXT_COMPILER_STATS_SCHEMA",
     "LOCK_PROJECTION_TOKEN_TARGET",
     "PAGE_CONTEXT_REPORT_SCHEMA",
     "PAGE_CONTEXT_SCHEMA",
@@ -43,6 +46,7 @@ __all__ = [
     "PageContextResult",
     "PageRead",
     "build_page_context",
+    "compile_page_context",
     "normalize_page_key",
     "page_context_usage_report",
     "record_page_context_usage",

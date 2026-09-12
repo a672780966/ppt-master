@@ -200,14 +200,20 @@ A Style never strips structure; only an explicit instruction to use the workspac
 
 ## 4. Export
 
-After every page and referenced resource exists, run the Quick branch of [`verify-charts`](../stages/verify-charts.md) when any data-driven chart was authored and complete its repairs, then prove canonical compact authoring with the one lockless final check; fix every blocking error and rerun the same command:
+After every page and referenced resource exists, run the Quick branch of [`verify-charts`](../stages/verify-charts.md) when any data-driven chart was authored and complete its repairs, then prove canonical compact authoring with the one lockless final check; fix every blocking error and rerun the same command. Page(s) completed → `slide.validate` ([`semantic_tools.md`](../../scripts/docs/semantic_tools.md)):
+
+```bash
+python3 ${SKILL_DIR}/scripts/semantic_tools.py slide.validate --input '{"project":"<project_path>","stage":"final","quick_generate":true}'
+```
+
+or equivalently the raw checker:
 
 ```bash
 python3 ${SKILL_DIR}/scripts/svg_quality_checker.py <project_path> \
   --quick-generate --canonical-authoring --stage final --json
 ```
 
-`--json` writes `validation/svg_quality_report.json`, the report `--quick-generate` export fingerprints against `svg_output/`; stdout stays the human-readable summary and is never parsed as JSON. Both flags above are required — omitting `--canonical-authoring` or `--json` makes the export refuse or skip the canonical check.
+Either form writes `validation/svg_quality_report.json`, the report `--quick-generate` export fingerprints against `svg_output/`; the raw command's stdout stays the human-readable summary and is never parsed as JSON — read `slide.validate`'s `{ok, errors}` instead. Both flags above are required on the raw command — omitting `--canonical-authoring` or `--json` makes the export refuse or skip the canonical check.
 
 **Mandatory — final carrier-receipt review**: run the review in [`executor-base.md`](../../references/executor-base.md) §3 Checkpoints against the retained page jobs, deck shape language, motif, resource roles, and geometry signatures; a repair reruns this checker once.
 
@@ -221,6 +227,15 @@ python3 ${SKILL_DIR}/scripts/total_md_split.py <project_path>
 
 **Motion and sound**: run [`customize-animations`](../stages/customize-animations.md) after the notes pass when the §1 outcome or an existing sidecar triggers it; deck-wide-only motion uses exporter flags. Quick video delivery completes the Custom Animations stage and validates `animations.json` before export unless the user asked for static or transition-only playback; direct narrated video derives cue timing only when narration governs groups. After motion is final, run the optional sound pass in [`animations.md`](../../references/animations.md) §2.2. `generate-audio` completes narrated MP4 delivery through the verified native mix or an explicit slideshow capture, never both.
 
+Final output → `deck.export` ([`semantic_tools.md`](../../scripts/docs/semantic_tools.md)):
+
+```bash
+python3 ${SKILL_DIR}/scripts/semantic_tools.py deck.export --input '{"project":"<project_path>","quick_generate":true,"with_notes":true}'   # Speaker Notes enabled
+python3 ${SKILL_DIR}/scripts/semantic_tools.py deck.export --input '{"project":"<project_path>","quick_generate":true,"no_notes":true}'     # Speaker Notes disabled
+```
+
+or equivalently the raw exporter:
+
 ```bash
 python3 ${SKILL_DIR}/scripts/svg_to_pptx.py <project_path> --quick-generate --with-notes   # Speaker Notes enabled
 python3 ${SKILL_DIR}/scripts/svg_to_pptx.py <project_path> --quick-generate --no-notes     # Speaker Notes disabled
@@ -229,6 +244,8 @@ python3 ${SKILL_DIR}/scripts/svg_to_pptx.py <project_path> --quick-generate --no
 **Exporter behavior**: `--quick-generate` reads `svg_output/`, resolves project-local assets, infers one canvas and one all-page structure mode (no metadata → flat; complete Master/Layout/slot metadata → structured), and needs no lock. Notes, Custom Animations, and narration stay off unless the agent enabled them or the video rule requires them; append `--native-charts-and-tables` only for an explicit native Chart/Table delivery decision. Never run `finalize_svg.py`. The exporter requires a passing `final` report whose fingerprint matches the current `svg_output/`; the default output path keeps backup and postflight, an explicit `-o <path>.pptx` skips backup.
 
 **On failure**: repair the owning SVG, resource, or capability input, rerun the checker, and export again — never create a Design Spec or lock. When Narration Audio is enabled, run [`generate-audio`](../stages/generate-audio.md) after the validated export (page audio/SRT, narrated PPTX, optional raw MP4, final mixed or captured MP4, or the capture-ready handoff).
+
+With `hooks.mode: "enforce"` on `<project_path>/build_state.json` ([`lifecycle_hooks.md`](../../scripts/docs/lifecycle_hooks.md), P4), `deck.export`'s PreToolUse hook and `build_state.py stop-check`'s completion check apply the same way here as in Default Generate — see [`generate-pptx.md`](../generate-pptx.md) Step 7.3 and its completion checklist. In `"shadow"` mode or with no `build_state.json`, this checklist itself remains the completion authority.
 
 ```markdown
 ## ✅ Quick Generate Complete

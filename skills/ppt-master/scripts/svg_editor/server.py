@@ -32,6 +32,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import webbrowser
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -98,6 +99,17 @@ from svg_to_pptx.geometry_properties import (  # noqa: E402
     INLINE_GEOMETRY_PROPERTIES,
     materialize_inline_geometry_properties,
 )
+
+# P5 Unified Workbench: additive route registration + the one splice into
+# save_all()'s write path. See scripts/docs/workbench.md.
+from runtime import ai_edit_jobs as _ai_edit_jobs  # noqa: E402
+from runtime.build_state import load as _load_build_state  # noqa: E402
+from runtime.svg_tree import find_by_id as _find_by_id  # noqa: E402
+from workbench import ai_edit_api as _workbench_ai_edit_api  # noqa: E402
+from workbench import confirm_api as _workbench_confirm_api  # noqa: E402
+from workbench import edit_wiring as _workbench_edit_wiring  # noqa: E402
+from workbench import runtime_api as _workbench_runtime_api  # noqa: E402
+from workbench import view_model as _workbench_view_model  # noqa: E402
 
 _USE_ICON_PATTERN = re.compile(r'<use\s+[^>]*data-icon="[^"]*"[^>]*/>')
 _XLINK_HREF = '{http://www.w3.org/1999/xlink}href'
@@ -340,13 +352,6 @@ def _append_annotation_log(project_path: Path, record: dict) -> None:
     _append_live_preview_log(project_path, ANNOTATION_LOG_NAME, record)
 
 
-def _find_by_id(root: ET.Element, element_id: str) -> Optional[ET.Element]:
-    for elem in root.iter():
-        if elem.get('id') == element_id:
-            return elem
-    return None
-
-
 def _apply_edit_record(root: ET.Element, record: dict) -> tuple[bool, Optional[str]]:
     element_id = record.get('element_id')
     if not isinstance(element_id, str):
@@ -443,6 +448,20 @@ def create_app(
     app.config['SVG_DIR'] = svg_dir
     app.config['LIVE_MODE'] = live
     app.config['LOCK_FILE'] = lock_file
+    app.config['SESSION_ID'] = uuid.uuid4().hex
+    app.config['WORKBENCH_ACTIVE_SLIDE'] = None
+
+    # P5 Unified Workbench: additive route groups, registered exactly like
+    # every other route in this function -- no rule lives in either module,
+    # both call straight through to already-existing P1-P4 functions.
+    _workbench_runtime_api.register(app, project_path)
+    _workbench_confirm_api.register(app, project_path)
+    # P6 Live AI Edit Loop: same pattern, plus one startup reconciliation
+    # pass so a crashed/killed AI Edit job never looks like it's still
+    # running after a restart (scripts/docs/ai_edit.md).
+    _workbench_ai_edit_api.register(app, project_path)
+    if _load_build_state(project_path) is not None:
+        _ai_edit_jobs.reconcile_interrupted_jobs(project_path)
 
     # In-memory annotation store: {filename: {element_id: annotation_text}}
     app.config['ANNOTATIONS'] = {}
@@ -525,6 +544,7 @@ def create_app(
             slide_count = len(list(svg_dir.glob('*.svg'))) if svg_dir.exists() else 0
         except OSError:
             slide_count = 0
+        build_state = _load_build_state(project_path)
         resp = jsonify({
             'status': 'ok',
             'service': 'live_preview',
@@ -533,6 +553,11 @@ def create_app(
             'live': app.config['LIVE_MODE'],
             'svg_output': str(svg_dir),
             'slides': slide_count,
+            'session_id': app.config['SESSION_ID'],
+            'active_slide': app.config['WORKBENCH_ACTIVE_SLIDE'],
+            'build_state': (
+                _workbench_view_model.project_view(build_state) if build_state else {'mode': 'legacy'}
+            ),
         })
         resp.headers['Cache-Control'] = 'no-store'
         return resp
@@ -974,6 +999,16 @@ def create_app(
             except OSError as exc:
                 failures.append(f'{filename}: Failed to write SVG: {exc}')
                 continue
+
+            # P5 direct-edit revision wiring: the Runtime (build_state.json)
+            # otherwise has zero awareness this file just changed on disk.
+            # No-ops cleanly on a legacy project (no build_state.json) or an
+            # unmappable filename; never blocks the save itself on failure.
+            try:
+                _workbench_edit_wiring.record_direct_edit(project_path, svg_file)
+            except Exception:
+                logger.exception('record_direct_edit failed for %s (SVG was still saved)', filename)
+
             ts = time.time()
             for element_id, annotation_text in anns.items():
                 old_text = old_annotations.get(element_id)

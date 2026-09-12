@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ppt-master://schemas/benchmark-run/v1",
+  "title": "PPT Master benchmark run record",
+  "description": "One P0 benchmark case's measured metrics. Enforced by hand-written checks in scripts/benchmark_report.py, following this repository's convention of treating JSON Schema files as a documented contract rather than a runtime validation-engine dependency (no generic JSON-Schema engine is used anywhere in this Skill).",
+  "type": "object",
+  "required": ["schema", "case_id", "run_at", "route", "metrics"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "ppt-master.benchmark-run.v1"},
+    "case_id": {
+      "type": "string",
+      "description": "Matches one row's id in references/benchmarking/corpus.md"
+    },
+    "run_at": {"type": "string", "format": "date-time"},
+    "route": {
+      "type": "string",
+      "description": "The route/profile actually used, e.g. 'quick', 'default', 'beautify', 'image-to-pptx', 'edit-native'"
+    },
+    "project_path": {"type": "string"},
+    "notes": {
+      "type": "string",
+      "description": "Any deviation from the case's recorded instruction in corpus.md"
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": {
+          "type": ["integer", "null"],
+          "x-source": "manual",
+          "description": "Not derivable from repo files; read from the host's own usage reporting"
+        },
+        "output_tokens": {
+          "type": ["integer", "null"],
+          "x-source": "manual",
+          "description": "Not derivable from repo files; read from the host's own usage reporting"
+        },
+        "wall_clock_seconds": {
+          "type": ["number", "null"],
+          "x-source": "auto",
+          "description": "benchmark-end minus benchmark-start NOTE timestamps in validation/workflow.log"
+        },
+        "tool_call_count": {
+          "type": ["integer", "null"],
+          "x-source": "auto-approx",
+          "description": "Count of 'PYTHON run=<id>' envelopes between the markers; undercounts non-Python tool calls"
+        },
+        "time_to_first_slide_seconds": {
+          "type": ["number", "null"],
+          "x-source": "auto",
+          "description": "mtime of the first svg_output/*.svg (sorted lexicographically) minus benchmark-start"
+        },
+        "time_to_usable_preview_seconds": {
+          "type": ["number", "null"],
+          "x-source": "auto",
+          "description": "mtime(live_preview/lock.json) minus benchmark-start"
+        },
+        "total_build_seconds": {
+          "type": ["number", "null"],
+          "x-source": "auto",
+          "description": "Same as wall_clock_seconds; kept as a distinct field to match the source spec's metrics table"
+        },
+        "checker_error_count": {
+          "type": ["integer", "null"],
+          "x-source": "auto",
+          "description": "validation/svg_quality_report.json categories.blocking.issues length"
+        },
+        "checker_warning_count": {
+          "type": ["integer", "null"],
+          "x-source": "auto",
+          "description": "validation/svg_quality_report.json categories.introduced.issues length"
+        },
+        "rework_count": {
+          "type": ["integer", "null"],
+          "x-source": "auto",
+          "description": "Extra svg_quality_checker.py invocations per stage beyond the first pass"
+        },
+        "pptx_postflight_result": {
+          "type": ["string", "null"],
+          "x-source": "auto",
+          "description": "status field from validation/<output_stem>.report.json"
+        },
+        "manual_correction_count": {
+          "type": ["integer", "null"],
+          "x-source": "manual"
+        },
+        "visual_score": {
+          "type": ["number", "null"],
+          "x-source": "manual",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "resume_success": {
+          "type": ["string", "null"],
+          "x-source": "manual",
+          "enum": ["yes", "no", "N/A"],
+          "description": "Always N/A for a P0 baseline record; P1 (Persistent Build State) does not exist yet at baseline time"
+        }
+      }
+    }
+  }
+}
