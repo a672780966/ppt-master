@@ -15,8 +15,8 @@ revision or validation logic lives here.
 Hard rule: an AI edit never touches a native chart/table/formula/shape
 group except through the matching semantic_tool operation -- the Native
 Object Integrity Gate (apply_edit_plan's _check_native_integrity) rejects
-any other operation type whose target or ancestor carries a native
-fingerprint, with zero writes.
+any other operation type or mismatched semantic tool whose target or
+ancestor carries a native fingerprint, with zero writes.
 
 Usage:
     from runtime.patch_engine import apply_edit_plan, PatchEngineError
@@ -49,6 +49,11 @@ _NATIVE_MARKER_ATTRS = (
 )
 _BOUNDS_ATTRS = ("data-pptx-bounds", "data-pptx-frame")
 _COMPANION_BOUNDS_ATTRS = ("data-pptx-x", "data-pptx-y", "data-pptx-width", "data-pptx-height")
+_NATIVE_TOOL_BY_REPLACEMENT_KIND = {
+    "chart": "chart.create",
+    "table": "table.create",
+    "formula": "formula.create",
+}
 
 
 class PatchEngineError(Exception):
@@ -78,24 +83,60 @@ def _has_native_fingerprint(elem: ET.Element) -> bool:
     return any(_local_tag(child) == "metadata" for child in elem)
 
 
+def _expected_semantic_tool(elem: ET.Element) -> str | None:
+    """Return the one authoring tool allowed to replace this native object.
+
+    Charts/tables/formulas advertise their replacement kind directly.
+    Authored preset shapes/connectors use the existing data-pptx-object /
+    data-pptx-authoring / data-pptx-prst contract and must go through
+    shape.create. An unknown native fingerprint has no safe matching tool.
+    """
+    replacement_kind = native_replacement_kind(elem)
+    if replacement_kind:
+        return _NATIVE_TOOL_BY_REPLACEMENT_KIND.get(replacement_kind)
+    if (
+        elem.get("data-pptx-object") in ("shape", "connector")
+        or elem.get("data-pptx-authoring") == "preset"
+        or elem.get("data-pptx-prst")
+    ):
+        return "shape.create"
+    return None
+
+
 def _build_parent_map(root: ET.Element) -> dict[int, ET.Element]:
     return {id(child): parent for parent in root.iter() for child in parent}
 
 
-def _check_native_integrity(root: ET.Element, parent_map: dict[int, ET.Element], anchor_id: str, op_type: str) -> None:
-    if op_type == "semantic_tool":
-        return
+def _check_native_integrity(
+    root: ET.Element,
+    parent_map: dict[int, ET.Element],
+    anchor_id: str,
+    op_type: str,
+    *,
+    semantic_tool: str | None = None,
+) -> None:
     elem = find_by_id(root, anchor_id)
     if elem is None:
         return
     node = elem
     while node is not None:
         if _has_native_fingerprint(node):
-            raise PatchEngineError(
-                "NATIVE_OBJECT_INTEGRITY_ERROR",
-                f"{anchor_id!r} is (or is inside) a native object; only a matching semantic_tool operation may modify it",
-                target=anchor_id,
-            )
+            if op_type != "semantic_tool":
+                raise PatchEngineError(
+                    "NATIVE_OBJECT_INTEGRITY_ERROR",
+                    f"{anchor_id!r} is (or is inside) a native object; only a matching semantic_tool operation may modify it",
+                    target=anchor_id,
+                )
+            expected_tool = _expected_semantic_tool(node)
+            if expected_tool is None or semantic_tool != expected_tool:
+                raise PatchEngineError(
+                    "NATIVE_OBJECT_INTEGRITY_ERROR",
+                    f"{anchor_id!r} is a native object that requires {expected_tool or 'its matching semantic tool'}, got {semantic_tool!r}",
+                    target=anchor_id,
+                    expected_tool=expected_tool,
+                    actual_tool=semantic_tool,
+                )
+            return
         node = parent_map.get(id(node))
 
 
@@ -164,7 +205,14 @@ def _apply_set_geometry(root: ET.Element, target: str, geometry: dict[str, objec
         h = float(geometry.get("height", h))
         _write_bounds(elem, attr, x, y, w, h)
         return
-    ok, reason = set_attributes(root, target, {k: v for k, v in geometry.items() if is_editable_attr(k)})
+    invalid_attrs = [key for key in geometry if not is_editable_attr(key)]
+    if invalid_attrs:
+        raise PatchEngineError(
+            "INVALID_EDIT_PLAN",
+            f"set_geometry on {target!r} contains protected attributes: {invalid_attrs}",
+            target=target,
+        )
+    ok, reason = set_attributes(root, target, dict(geometry))
     if not ok:
         raise PatchEngineError("INVALID_EDIT_PLAN", f"set_geometry on {target!r} failed: {reason}", target=target)
 
@@ -227,9 +275,8 @@ def apply_edit_plan(
     `before_svg_path`, when given, receives the pre-edit SVG content
     verbatim -- the Undo snapshot (SS32). `clear_annotation_id`, when
     given, clears that element's data-edit-target/data-edit-annotation
-    attrs in the same write -- the "resolved" step for an
-    origin="annotation" job (SS40); never set on a job that ended in
-    anything other than a validated success.
+    attrs in the same write. This remains the documented P6 trade-off:
+    cleanup is atomic with the patch and therefore precedes validation.
     """
     original_text = svg_path.read_text(encoding="utf-8")
     if before_svg_path is not None:
@@ -241,14 +288,27 @@ def apply_edit_plan(
     for op in operations:
         op_type = op["type"]
         anchor_id = op["parent"] if op_type == "insert_fragment" else op["target"]
-        _check_native_integrity(working, parent_map, anchor_id, op_type)
+        _check_native_integrity(
+            working,
+            parent_map,
+            anchor_id,
+            op_type,
+            semantic_tool=op.get("tool") if op_type == "semantic_tool" else None,
+        )
 
         if op_type == "set_text":
             ok, reason = set_text(working, op["target"], op["value"])
             if not ok:
                 raise PatchEngineError("INVALID_EDIT_PLAN", f"set_text on {op['target']!r} failed: {reason}", target=op["target"])
         elif op_type == "set_style":
-            style = {k: v for k, v in op["style"].items() if is_editable_attr(k)}
+            invalid_attrs = [key for key in op["style"] if not is_editable_attr(key)]
+            if invalid_attrs:
+                raise PatchEngineError(
+                    "INVALID_EDIT_PLAN",
+                    f"set_style on {op['target']!r} contains protected attributes: {invalid_attrs}",
+                    target=op["target"],
+                )
+            style = dict(op["style"])
             ok, reason = set_attributes(working, op["target"], style)
             if not ok:
                 raise PatchEngineError("INVALID_EDIT_PLAN", f"set_style on {op['target']!r} failed: {reason}", target=op["target"])
@@ -289,7 +349,7 @@ def apply_edit_plan(
     if clear_annotation_id:
         # Deliberately bypasses set_attributes()/is_editable_attr(): those
         # exist to protect data-edit-* from *user* edits, not from this
-        # sanctioned annotation-resolution cleanup after a validated AI edit.
+        # sanctioned annotation-resolution cleanup in the atomic patch.
         annotated_elem = find_by_id(working, clear_annotation_id)
         if annotated_elem is not None:
             annotated_elem.attrib.pop("data-edit-target", None)
