@@ -40,6 +40,8 @@ Dependencies:
 
 from __future__ import annotations
 
+import math
+
 SCOPES = ("element", "selection", "slide")
 
 OPERATION_TYPES = frozenset({
@@ -91,8 +93,13 @@ def _fail(code: str, message: str, **details: object) -> None:
 
 
 def _is_number(value: object) -> bool:
-    # bool is an int subclass in Python but is never a meaningful SVG number.
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    # bool is an int subclass in Python but is never a meaningful SVG number;
+    # NaN/Infinity are valid Python floats but invalid deterministic geometry.
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
 
 
 def _require_nonempty_string(value: object, label: str) -> str:
@@ -132,6 +139,8 @@ def _validate_operation_payload(op: dict[str, object], index: int) -> None:
                     "INVALID_EDIT_PLAN",
                     f"{prefix}.style[{key!r}] must be a string/number/null",
                 )
+            if isinstance(value, float) and not math.isfinite(value):
+                _fail("INVALID_EDIT_PLAN", f"{prefix}.style[{key!r}] must be finite")
 
     elif op_type == "set_geometry":
         geometry = op.get("geometry")
@@ -141,11 +150,11 @@ def _validate_operation_payload(op: dict[str, object], index: int) -> None:
             if key not in _GEOMETRY_FIELDS:
                 _fail("INVALID_EDIT_PLAN", f"{prefix}.geometry has unsupported field: {key!r}")
             if not _is_number(value):
-                _fail("INVALID_EDIT_PLAN", f"{prefix}.geometry[{key!r}] must be numeric")
+                _fail("INVALID_EDIT_PLAN", f"{prefix}.geometry[{key!r}] must be numeric and finite")
 
     elif op_type == "translate":
         if not _is_number(op.get("dx")) or not _is_number(op.get("dy")):
-            _fail("INVALID_EDIT_PLAN", f"{prefix}.dx/.dy must be numeric")
+            _fail("INVALID_EDIT_PLAN", f"{prefix}.dx/.dy must be numeric and finite")
 
     elif op_type == "resize":
         width = op.get("width")
@@ -156,7 +165,7 @@ def _validate_operation_payload(op: dict[str, object], index: int) -> None:
             if value is None:
                 continue
             if not _is_number(value) or float(value) <= 0:
-                _fail("INVALID_EDIT_PLAN", f"{prefix}.{name} must be a positive number")
+                _fail("INVALID_EDIT_PLAN", f"{prefix}.{name} must be a positive finite number")
 
     elif op_type in ("replace_fragment", "insert_fragment"):
         _require_nonempty_string(op.get("fragment"), f"{prefix}.fragment")
@@ -216,9 +225,11 @@ def validate_edit_plan(
 
     validated: list[dict[str, object]] = []
     for index, op in enumerate(operations):
-        if not isinstance(op, dict) or op.get("type") not in OPERATION_TYPES:
+        if not isinstance(op, dict):
+            _fail("INVALID_EDIT_PLAN", f"operations[{index}] must be an object")
+        op_type = op.get("type")
+        if not isinstance(op_type, str) or op_type not in OPERATION_TYPES:
             _fail("INVALID_EDIT_PLAN", f"operations[{index}] has an invalid or missing type")
-        op_type = op["type"]
         for field_name in _OPERATION_REQUIRED_FIELDS[op_type]:
             if field_name not in op:
                 _fail("INVALID_EDIT_PLAN", f"operations[{index}] ({op_type}) missing required field: {field_name}")
