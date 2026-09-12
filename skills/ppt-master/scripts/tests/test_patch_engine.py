@@ -66,6 +66,22 @@ class PatchEngineTests(unittest.TestCase):
         self.assertIn(_SVG.split("\n")[3].strip(), self.svg_path.read_text(encoding="utf-8"))
         self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
 
+    def test_native_object_rejects_mismatched_semantic_tool(self) -> None:
+        with self.assertRaises(PatchEngineError) as ctx:
+            apply_edit_plan(
+                self.project_path, "P01", self.svg_path,
+                [{
+                    "type": "semantic_tool",
+                    "target": "chart-01",
+                    "tool": "formula.create",
+                    "arguments": {"latex": "x"},
+                }],
+            )
+        self.assertEqual(ctx.exception.code, "NATIVE_OBJECT_INTEGRITY_ERROR")
+        self.assertEqual(ctx.exception.details["expected_tool"], "chart.create")
+        self.assertEqual(ctx.exception.details["actual_tool"], "formula.create")
+        self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
+
     def test_native_object_rejects_delete_of_ancestor_protected_child(self) -> None:
         # shape-01 has no native marker itself, but let's mark its child
         # to simulate "ancestor carries the fingerprint" the other way:
@@ -89,6 +105,16 @@ class PatchEngineTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "INVALID_EDIT_PLAN")
         self.assertIn("duplicate ids", str(ctx.exception))
         self.assertEqual(load(self.project_path).slides["P01"].revision, 1)  # zero writes
+
+    def test_set_style_rejects_protected_attribute_instead_of_silently_dropping_it(self) -> None:
+        with self.assertRaises(PatchEngineError) as ctx:
+            apply_edit_plan(
+                self.project_path, "P01", self.svg_path,
+                [{"type": "set_style", "target": "title-01", "style": {"id": "rewritten"}}],
+            )
+        self.assertEqual(ctx.exception.code, "INVALID_EDIT_PLAN")
+        self.assertIn('id="title-01"', self.svg_path.read_text(encoding="utf-8"))
+        self.assertEqual(load(self.project_path).slides["P01"].revision, 1)
 
     def test_before_svg_snapshot_captures_pre_edit_content(self) -> None:
         before_path = self.project_path / "before.svg"
