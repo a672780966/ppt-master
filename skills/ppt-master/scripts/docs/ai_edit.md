@@ -46,9 +46,10 @@ Selection -> Instruction -> AIEditContext -> EditPlan
 3. **Reason.** The agent's own capability, no extra call.
 4. **Submit** (`POST .../plan` or `ai_edit_cli.py submit-plan`): a
    structured EditPlan (`runtime/edit_plan.py`) — never a full SVG, never
-   freeform text.
+   freeform text. `base_revision` must exactly match the job's captured
+   revision; a model cannot relabel an old plan as current.
 5. **Validate + Apply** (`runtime/patch_engine.py::apply_edit_plan`, one
-   transaction): scope/target/tool-allowlist checked
+   transaction): field types/revision/scope/target/tool-allowlist checked
    (`runtime/edit_plan.py::validate_edit_plan`) before a single byte is
    written; every operation applied to a deep-copied working tree; the
    Native Object Integrity Gate enforced; a structural round-trip check
@@ -76,22 +77,35 @@ style}`, `set_geometry {target, geometry}`, `translate {target, dx, dy}`,
 `semantic_tool {target, tool, arguments}` (`tool` must be one of
 `shape.create`/`chart.create`/`table.create`/`formula.create` — the only
 `tools.dispatch.TOOLS` entries that are *authoring* operations).
+Operation payloads are type-checked before Patch Engine entry: numeric
+geometry must be finite, `style`/`arguments` must be objects, fragments and
+text must be strings, and resize dimensions must be positive.
 `translate`/`resize`/`set_geometry` write through a `data-pptx-bounds`/
 `data-pptx-frame` marker when present (keeping any companion
-`data-pptx-x/y/width/height` attrs in sync), else plain `x`/`y`/`width`/
-`height`/`cx`/`cy` attrs, else (translate only) a composed `transform`.
+`data-pptx-x/y/width/height` attrs in sync); bounded `set_geometry` accepts
+only `x`/`y`/`width`/`height` rather than silently ignoring incompatible
+geometry fields. Unbounded ordinary SVG objects use their native geometry
+attributes; translate may fall back to a composed `transform`.
 
 ## Native Object Integrity Gate
 
-Before any non-`semantic_tool` operation, the target (and every ancestor)
-is checked for a native fingerprint — `data-pptx-replace-with` (incl.
-legacy `data-pptx-native`), `data-pptx-authoring`, `data-pptx-object`,
+Before an operation, the target and its ancestor chain are checked for a
+native fingerprint — `data-pptx-replace-with` (incl. legacy
+`data-pptx-native`), `data-pptx-authoring`, `data-pptx-object`,
 `data-pptx-prst`, or a `<metadata type="application/json">` child. Any
-match → `NATIVE_OBJECT_INTEGRITY_ERROR`, zero writes. Only a matching
-`semantic_tool` call (e.g. `chart.create` on a chart) may touch it — the
-sanctioned "regenerate through the real tool" path. `arguments.frame` is
-auto-filled from the target's current bounds when the operation omits it,
-so "make it a line chart" doesn't need to repeat the geometry.
+native match rejects an ordinary SVG edit with
+`NATIVE_OBJECT_INTEGRITY_ERROR`, zero writes. A semantic replacement is
+allowed only when **both** conditions hold:
+
+1. the operation targets the native object's own root id (never a child
+   fallback path/text id inside that object), and
+2. the semantic tool matches the native kind: chart -> `chart.create`,
+   table -> `table.create`, formula -> `formula.create`, authored preset
+   shape/connector -> `shape.create`.
+
+`arguments.frame` is auto-filled from the target root's current bounds when
+the operation omits it, so a semantic regeneration need not repeat the
+existing geometry.
 
 ## Conflict control (`runtime/edit_conflicts.py`)
 
@@ -101,11 +115,16 @@ A revision conflict at submit time — the slide changed since the job's
 automatic rebase: discard the plan, rebuild `AIEditContext` at the new
 revision, confirm every `selection_id` still resolves
 (`SELECTION_NO_LONGER_EXISTS` otherwise), job returns to `queued` for one
-fresh plan. A second conflict after that one rebase →
-`EDIT_CONFLICT_REQUIRES_RETRY`, job → `conflicted`, zero writes — the
-human redoes the edit from scratch. `INVALID_EDIT_PLAN` gets one schema-
-repair attempt (`plan_attempts` capped at 2 total submissions); a third
-still-invalid submission fails permanently.
+fresh plan. A second conflict after that one rebase ->
+`EDIT_CONFLICT_REQUIRES_RETRY`, job -> `conflicted`, zero writes — the
+human redoes the edit from scratch.
+
+Malformed `INVALID_EDIT_PLAN` output gets **one** same-job schema-repair
+opportunity: the first invalid submission leaves the job `queued`; the
+second invalid submission is terminal `failed`. There are therefore two
+total plan submissions for that job, not an unlimited repair loop. Scope,
+native-integrity, missing-selection, and other semantic failures remain
+terminal and are not relabeled as schema repair.
 
 ## Job lifecycle (`runtime/ai_edit_jobs.py`)
 
@@ -119,9 +138,11 @@ optional/backward-compatible). "One active AI mutator per slide" is
 enforced by scanning *persisted* job status, not an in-memory map — jobs
 are created/submitted from two different processes (the long-running
 Workbench and one-shot `ai_edit_cli.py` invocations), so only durable
-state is trustworthy across both. `reconcile_interrupted_jobs()` runs once
-at Workbench startup: any job not yet in a terminal status is flipped to
-`interrupted` — never auto-applies a leftover plan.
+state is trustworthy across both. A rebase that discovers the selected
+object has disappeared terminates the job and releases the slide's active
+job pointer rather than leaving it permanently busy. `reconcile_interrupted_jobs()`
+runs once at Workbench startup: any job not yet in a terminal status is
+flipped to `interrupted` — never auto-applies a leftover plan.
 
 ## Undo
 
@@ -137,18 +158,20 @@ AI edit's own result revision (`runtime.edit_conflicts.check_undo_conflict`)
 "Apply with AI" on an existing annotation creates the exact same job
 (`origin: "annotation"`, `scope: "element"`, `selection_ids: [that
 element's id]`, `instruction: <the annotation text>`) — never a second
-pipeline. On a validated success, the element's `data-edit-target`/
-`data-edit-annotation` attrs are cleared in the same atomic write (bypasses
-`is_editable_attr`'s user-facing protection deliberately — this is
-sanctioned system cleanup, not a user edit). **Known trade-off**: this
-clearing happens whenever the apply itself succeeds, before validation's
-outcome is known, so `completed_with_validation_error` jobs also clear
-the on-disk annotation attributes — `check_annotations.py`'s file-attribute
-scan will no longer show them as pending. The job's own persisted status
-(visible via `GET /api/runtime/ai-edits/<id>` and the Workbench's job
-panel) is the authoritative "did this actually resolve cleanly" signal
-for annotations applied through this pipeline; it does not re-litigate
-that decision through file attributes a second way.
+pipeline. The element's `data-edit-target`/`data-edit-annotation` attrs are
+cleared in the same atomic patch write (bypasses `is_editable_attr`'s
+user-facing protection deliberately — this is sanctioned system cleanup,
+not a user edit).
+
+**Known trade-off, intentionally unchanged by the P6 hardening pass**: this
+clearing happens when the apply itself succeeds, before validation's
+outcome is known, so `completed_with_validation_error` jobs also clear the
+on-disk annotation attributes. Moving cleanup strictly after validation
+would require another coordinated artifact mutation/revision/hash step and
+is not a narrow contract fix. The job's own persisted status (visible via
+`GET /api/runtime/ai-edits/<id>` and the Workbench's job panel) remains the
+authoritative "did this resolve cleanly" signal for annotations applied
+through this pipeline.
 
 ## Error vocabulary
 
